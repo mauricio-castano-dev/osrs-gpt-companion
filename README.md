@@ -2,6 +2,8 @@
 
 # ⚔️ OSRS GPT Companion
 
+**Español** · [English](README.en.md) · [Português (Brasil)](README.pt-BR.md)
+
 **Tu personaje, tus objetivos y un agente que recuerda cómo te gusta jugar.**
 
 Un asistente de consola para **Old School RuneScape**, construido en Python,
@@ -37,6 +39,10 @@ Conversa sobre tu progreso y conserva tus preferencias entre sesiones:
 
 **La aplicación se ejecuta en tu PC; la inferencia se realiza en OpenAI.** El estado
 y las memorias que consulta el modelo se envían como contexto de esas solicitudes.
+
+La documentación está disponible en español, inglés y portugués de Brasil.
+Los comandos, los mensajes de consola y el idioma predeterminado actual del
+agente siguen en español.
 
 ## 🚀 Inicio rápido
 
@@ -174,6 +180,9 @@ osrs-gpt-companion/
 ├── examples/
 │   └── player.example.json
 ├── requirements.txt
+├── README.md            # Español
+├── README.en.md         # Inglés
+├── README.pt-BR.md      # Portugués de Brasil
 └── CHANGELOG.md
 ```
 
@@ -234,8 +243,9 @@ Estas tareas son planes de evolución y no funcionalidades incluidas.
 ## 🤝 Desarrollo y documentación
 
 Las mejoras de comportamiento deben incluir pruebas relevantes y actualizar
-este README y el [historial de cambios](CHANGELOG.md). El README describe siempre
-lo que funciona en la versión actual; las propuestas permanecen en la hoja de ruta.
+las tres versiones del README y el [historial de cambios](CHANGELOG.md).
+La versión en español es la referencia. Cada traducción describe lo que funciona
+en la versión actual; las propuestas permanecen en la hoja de ruta.
 
 Al reportar un problema, incluye el comando, el mensaje de error y la versión
 de Python. Comparte únicamente ejemplos ficticios o datos que quieras hacer públicos.

@@ -2,6 +2,9 @@
 
 ## Documentación — 2026-11-09
 
+- Añadidas traducciones completas al inglés y portugués de Brasil, con navegación entre idiomas.
+- Español conservado como documentación principal; traducciones sincronizadas en el mantenimiento.
+
 - Identificado **Character Snapshot** como plugin exportador de RuneLite.
 - Aclarado que el usuario elige la carpeta de exportación en el plugin.
 - Corregidos los ejemplos para utilizar `<nombre_del_personaje>.json` y una ruta explícita mediante `--state-file`.

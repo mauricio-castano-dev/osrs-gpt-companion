@@ -13,3 +13,8 @@
   en namespaces y resultados mediante function_call_output/call_id.
 - Las acciones con efectos locales se ejecutan solo tras completar la respuesta
   del modelo y validar el nombre de herramienta y sus argumentos.
+
+- La documentación principal está en español (`README.md`). Mantén sincronizados
+  `README.en.md` y `README.pt-BR.md` cuando cambien comportamientos o ejemplos.
+  Conserva los nombres reales de comandos, opciones, archivos y herramientas
+  en todas las traducciones; no traduzcas identificadores ejecutables.
