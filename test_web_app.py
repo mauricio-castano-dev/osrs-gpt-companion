@@ -52,11 +52,15 @@ class WebTests(unittest.TestCase):
         data = result.json()
         self.assertEqual(data['model'], 'test-model')
         self.assertTrue(data['stats']['ok'])
+        self.assertFalse(data['busy'])
+        self.assertEqual(data['active_tools'], [])
         self.assertIn('freshness', data)
         self.assertNotIn('items', data['items']['bank'])
         self.answer.assert_not_called()
         html = self.http.get(self.base, timeout=5)
         self.assertIn(self.server.app.csrf, html.text)
+        for name in ('tab-state', 'tab-gear', 'tab-memory', 'gear-content'):
+            self.assertIn(f'id="{name}"', html.text)
         self.assertIn('frame-ancestors', html.headers['Content-Security-Policy'])
         self.assertEqual(html.headers['Cache-Control'], 'no-store')
         for path in ('/app.js', '/app.css'):
@@ -123,6 +127,61 @@ class WebTests(unittest.TestCase):
         self.assertEqual(result.status_code, 502)
         self.assertNotIn('sensitive', result.text)
         self.assertEqual(self.server.app.history, [])
+        status = self.http.get(self.base + '/api/status', timeout=5).json()
+        self.assertFalse(status['busy'])
+        self.assertEqual(status['active_tools'], [])
+
+    def test_live_status_reports_tools_during_chat_then_clears_on_completion(self):
+        ready = threading.Event()
+        release = threading.Event()
+        results = []
+        def delayed_answer(message, model, history, router, on_tool_call):
+            on_tool_call('query_player_stats', True)
+            on_tool_call('check_ge_price', False)
+            ready.set()
+            if not release.wait(5):
+                raise RuntimeError('Test did not release answer')
+            return 'Done'
+        self.answer.side_effect = delayed_answer
+        def send_chat():
+            with requests.Session() as http:
+                http.trust_env = False
+                results.append(http.post(self.base + '/api/chat', json={'message': 'test'},
+                               headers={'X-CSRF-Token': self.server.app.csrf}, timeout=8))
+        worker = threading.Thread(target=send_chat)
+        worker.start()
+        try:
+            self.assertTrue(ready.wait(5))
+            status = self.http.get(self.base + '/api/status', timeout=5).json()
+            expected = [{'name': 'query_player_stats', 'ok': True}, {'name': 'check_ge_price', 'ok': False}]
+            self.assertTrue(status['busy'])
+            self.assertEqual(status['active_tools'], expected)
+            status['active_tools'][0]['name'] = 'mutated copy'
+            self.assertEqual(self.server.app.status()['active_tools'], expected)
+        finally:
+            release.set()
+            worker.join(8)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results[0].status_code, 200)
+        self.assertEqual(results[0].json()['tools_used'], expected)
+        final = self.http.get(self.base + '/api/status', timeout=5).json()
+        self.assertFalse(final['busy'])
+        self.assertEqual(final['active_tools'], [])
+
+    def test_failed_chat_also_clears_live_tool_progress(self):
+        def fail(message, model, history, router, on_tool_call):
+            on_tool_call('search_osrs_wiki', False)
+            raise web_app.CompanionError('Offline')
+        self.answer.side_effect = fail
+        self.assertEqual(self.post('/api/chat', {'message': 'test'}).status_code, 502)
+        self.assertEqual(self.server.app.active_tools, [])
+        self.assertFalse(self.server.app.status()['busy'])
+
+    def test_clear_history_resets_tool_progress_without_inference(self):
+        self.server.app.active_tools = [{'name': 'old', 'ok': True}]
+        self.assertEqual(self.post('/api/chat', {'message': '/limpiar'}).status_code, 200)
+        self.assertEqual(self.server.app.active_tools, [])
+        self.answer.assert_not_called()
 
     def test_occupied_port_uses_a_free_loopback_port(self):
         with web_app.create_server(self.monitor, 'test', self.server.server_port) as other:

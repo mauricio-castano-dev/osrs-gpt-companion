@@ -15,10 +15,15 @@
       <div class="panel-heading"><h2>Tu personaje</h2><span class="freshness" id="live-freshness">Reporte: sin fecha</span></div>
       <section class="character"><div class="crest" aria-hidden="true">♜</div><div><h3 id="player-name">Esperando al aventurero</h3><p id="player-meta">Abre RuneLite y activa Character Snapshot.</p></div></section>
       <div class="wealth"><div><span>QUEST POINTS</span><strong id="quest-points">—</strong></div><div><span>FORTUNA · GP</span><strong id="gold">—</strong></div></div>
-      <nav role="tablist" class="tabs" aria-label="Panel del personaje"><button role="tab" aria-controls="state-content" id="tab-state" class="selected" aria-selected="true">Estado en vivo</button><button role="tab" aria-controls="memory-content" id="tab-memory" aria-selected="false">Memorias <span id="memory-count"></span></button></nav>
+      <nav role="tablist" class="tabs" aria-label="Panel del personaje"><button role="tab" aria-controls="state-content" id="tab-state" class="selected" aria-selected="true">Habilidades &amp; Runs</button><button role="tab" aria-controls="gear-content" id="tab-gear" aria-selected="false" tabindex="-1">Equipo &amp; Progreso</button><button role="tab" aria-controls="memory-content" id="tab-memory" aria-selected="false" tabindex="-1">Memorias <span id="memory-count"></span></button></nav>
       <div role="tabpanel" aria-labelledby="tab-state" id="state-content">
         <section class="hud-section"><div class="section-label"><h3>Habilidades</h3><span>LEVELS</span></div><div class="skills" id="skills"><p class="muted">Esperando la primera instantánea…</p></div></section>
         <section class="hud-section"><div class="section-label"><h3>Farming &amp; Birdhouses</h3><span id="patch-count"></span></div><div id="farming" class="activities"></div><div id="birdhouses" class="activities"></div></section>
+      </div>
+      <div role="tabpanel" aria-labelledby="tab-gear" id="gear-content" hidden>
+        <section class="hud-section"><div class="section-label"><h3>Equipo actual</h3><span>EQUIPMENT</span></div><div id="equipment" class="equipment-grid"></div></section>
+        <section class="hud-section"><div class="section-label"><h3>Grand Exchange</h3><span>TUS OFERTAS</span></div><div id="ge-offers"></div></section>
+        <section class="hud-section"><h3>Slayer &amp; Progreso</h3><div id="slayer"></div><div id="quest-progress" class="progress-summary"></div><h4 class="progress-title">Combat Achievements</h4><div id="combat-progress"></div><h4 class="progress-title">Kill Counts</h4><div id="kill-counts"></div></section>
       </div>
       <section role="tabpanel" aria-labelledby="tab-memory" id="memory-content" hidden class="hud-section"><h3>Lo que quieres recordar</h3><p class="muted">Tus objetivos y preferencias, guardados en este equipo.</p><div id="memories"></div></section>
       <details class="snapshot-details"><summary>Archivo conectado</summary><p id="state-path"></p><p>El HUD se actualiza cada 3 s. No utiliza el modelo.</p></details>

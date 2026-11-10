@@ -296,6 +296,27 @@ retorna 409. O histórico é temporário e se perde ao fechar o servidor. APIs e
 páginas usam `Cache-Control: no-store`. Tokens da OpenAI não chegam ao navegador;
 o token CSRF é independente e existe apenas durante a sessão local do servidor.
 
+
+### Equipamento, progresso e ferramentas em tempo real
+
+O HUD tem três abas: **Habilidades & Runs**, **Equipo & Progreso** e **Memorias**.
+A aba de progresso mostra slots ocupados de equipamento, ofertas pessoais do GE
+com quantidades/preços, mestre/tarefa/sequência/pontos de Slayer, contagens de
+missões, níveis de Combat Achievements e KC destacados. Dados ausentes são
+indicados sem inventar valores; snapshots indisponíveis não exibem valores
+antigos como atuais. As abas aceitam setas, Home e End do teclado.
+
+Durante uma consulta, `GET /api/status` expõe `busy` e `active_tools`. O polling
+de três segundos atualiza o indicador do chat com ferramentas que já terminaram
+a execução. Não é streaming de tokens nem aviso de início de ferramenta: usa
+o callback após a execução. O progresso é limpo ao terminar, falhar ou limpar
+o histórico; os chips da resposta final permanecem.
+
+O chat agrupa itens com `-`, `*` ou números em listas HTML, reconhece títulos
+`#`/`##`/`###`, preserva blocos de código e ignora linhas vazias redundantes.
+O conteúdo é criado com nós DOM e texto, nunca com `innerHTML` para dados do
+personagem ou do modelo. As proteções CSP e CSRF/origem são preservadas.
+
 ## 🗂 Estrutura do projeto
 
 ```text
@@ -305,6 +326,8 @@ osrs-gpt-companion/
 ├── launcher.py          # Windows PATH
 ├── pyproject.toml       # Console entry points
 ├── ui/                  # HTML / CSS / JS
+├── test_frontend.py     # Optional JS rendering tests
+├── tests/ui.test.cjs     # Synthetic DOM, no browser
 ├── test_web_app.py      # Local API tests
 ├── test_app_shell.py    # Freshness + launchers
 ├── main.py              # Console e ciclo de vida do monitor
@@ -363,6 +386,10 @@ Os testes de DPAPI precisam de acesso ao perfil de criptografia do usuário do W
 O cliente aceita conexões que omitem `Content-Type` quando o corpo contém eventos
 SSE válidos. Rejeita eventos malformados e respostas sem confirmação de conclusão;
 chamadas incompletas de ferramentas não são executadas.
+
+Opcionalmente, Node.js executa sete testes adicionais de renderização com um DOM
+sintético. Não é necessário para instalar, compilar ou usar o aplicativo. Quando
+disponível, `python -m unittest -v` também executa essa verificação.
 
 ## 📌 Alcance atual
 

@@ -292,6 +292,27 @@ History remains temporary and is lost when the server closes. APIs and pages
 use `Cache-Control: no-store`. OpenAI tokens never reach the browser; the CSRF
 token is separate and exists only for the local server session.
 
+
+### Equipment, progress, and live tools
+
+The HUD has three tabs: **Habilidades & Runs**, **Equipo & Progreso**, and
+**Memorias**. The progress tab shows occupied equipment slots, personal GE offers
+with quantities/prices, Slayer master/task/streak/points, quest counts, Combat
+Achievement tiers, and highlighted KC. Missing data is reported without invented
+values; unavailable snapshots do not expose old values as current. Tabs support
+arrow keys, Home, and End.
+
+During a query, `GET /api/status` exposes `busy` and `active_tools`. Three-second
+polling updates the chat indicator with tools whose execution has completed.
+This is not token streaming or a notification that a tool has just started:
+it uses the post-execution callback. Progress clears on completion, failure, or
+history reset; the final response keeps its tool chips.
+
+Chat groups `-`, `*`, or numbered items into HTML lists, recognizes `#`/`##`/`###`
+headings, preserves code blocks, and skips redundant blank lines. Rendering uses
+DOM nodes and text, never `innerHTML` for character or model data. CSP and
+CSRF/origin protections remain in place.
+
 ## 🗂 Project structure
 
 ```text
@@ -301,6 +322,8 @@ osrs-gpt-companion/
 ├── launcher.py          # Windows PATH
 ├── pyproject.toml       # Console entry points
 ├── ui/                  # HTML / CSS / JS
+├── test_frontend.py     # Optional JS rendering tests
+├── tests/ui.test.cjs     # Synthetic DOM, no browser
 ├── test_web_app.py      # Local API tests
 ├── test_app_shell.py    # Freshness + launchers
 ├── main.py              # Console and monitor lifecycle
@@ -358,6 +381,10 @@ DPAPI tests require access to the Windows user's encryption profile.
 The client accepts connections that omit `Content-Type` if the body contains
 valid SSE events. It rejects malformed events and responses without completion
 confirmation; incomplete tool calls are not executed.
+
+Optionally, Node.js runs seven additional rendering tests with a synthetic DOM.
+It is not required to install, build, or use the application. When available,
+`python -m unittest -v` also runs this check.
 
 ## 📌 Current scope
 

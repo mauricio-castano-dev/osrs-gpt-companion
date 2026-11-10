@@ -37,6 +37,8 @@ class AppState:
         self.answer = answer_fn or answer
         self.history = []
         self.lock = threading.Lock()
+        self.active_tools = []
+        self.tools_lock = threading.Lock()
         self.csrf = secrets.token_urlsafe(32)
 
     def freshness(self):
@@ -44,16 +46,22 @@ class AppState:
         return {'lastUpdated': timestamp, 'freshness': format_relative_time(timestamp)}
 
     def status(self):
+        with self.tools_lock:
+            busy = self.lock.locked()
+            active_tools = [dict(tool) for tool in self.active_tools] if busy else []
         return {'stats': self.monitor.query_stats([], True),
                 'items': self.monitor.query_items('', 'all'),
                 'quests': self.monitor.query_quests_diaries('', 'all', 'all'),
-                **self.freshness(), 'model': self.model, 'state_file': str(self.monitor.path)}
+                **self.freshness(), 'model': self.model, 'state_file': str(self.monitor.path),
+                'busy': busy, 'active_tools': active_tools}
 
     def chat(self, message):
         # Una peticion simultanea no debe bloquear silenciosamente y enviar otra inferencia.
         if not self.lock.acquire(blocking=False):
             return 409, {'error': 'Hay una respuesta en curso. Espera a que termine.'}
         try:
+            with self.tools_lock:
+                self.active_tools = []
             if message == '/limpiar':
                 self.history.clear()
                 return 200, {'reply': 'Historial limpiado; las memorias guardadas se conservan.',
@@ -61,12 +69,19 @@ class AppState:
             if message.startswith('/'):
                 return 400, {'error': 'Usa /limpiar o los controles de estado y memorias de la interfaz.'}
             used = []
+            def record_tool(name, ok):
+                tool = {'name': name, 'ok': bool(ok)}
+                used.append(tool)
+                with self.tools_lock:
+                    self.active_tools.append(dict(tool))
             reply = self.answer(message, self.model, self.history, self.router,
-                                on_tool_call=lambda name, ok: used.append({'name': name, 'ok': bool(ok)}))
+                                on_tool_call=record_tool)
             self.history.extend([{'role': 'user', 'content': message}, {'role': 'assistant', 'content': reply}])
             self.history = self.history[-12:]
             return 200, {'reply': reply, 'tools_used': used, **self.freshness()}
         finally:
+            with self.tools_lock:
+                self.active_tools = []
             self.lock.release()
 
 

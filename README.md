@@ -298,6 +298,28 @@ devuelve 409. El historial sigue siendo temporal y se pierde al cerrar el servid
 Las APIs y la página usan `Cache-Control: no-store`. Los tokens de OpenAI no se
 entregan al navegador; el token CSRF es independiente y vive solo durante la sesión.
 
+
+### Equipo, progreso y herramientas en vivo
+
+El HUD tiene tres pestañas: **Habilidades & Runs**, **Equipo & Progreso** y
+**Memorias**. La pestaña de progreso muestra slots ocupados de equipo, ofertas
+personales del GE con cantidades/precio, maestro y tarea de Slayer, racha y
+puntos, conteos de misiones, tiers de Combat Achievements y KC destacados. Los
+datos ausentes se indican sin inventar valores; los paneles no muestran datos
+antiguos como actuales si la instantánea no está disponible. Las pestañas se
+pueden recorrer con las flechas, Home y End del teclado.
+
+Durante una consulta, `GET /api/status` expone `busy` y `active_tools`. El polling
+de tres segundos actualiza el indicador del chat con las herramientas que ya
+terminaron su ejecución. No es streaming de tokens ni un aviso de inicio de cada
+herramienta: utiliza el callback posterior a la ejecución. El progreso se borra
+al terminar, fallar o limpiar el turno; los chips de la respuesta final permanecen.
+
+El formato del chat agrupa listas con `-`, `*` o números en listas HTML, reconoce
+encabezados `#`/`##`/`###`, conserva bloques de código e ignora líneas vacías
+redundantes. Todo se construye con nodos DOM y texto, sin `innerHTML` para datos
+del modelo o del personaje. La política CSP y los controles CSRF/origen se conservan.
+
 ## 🗂 Estructura
 
 ```text
@@ -307,6 +329,8 @@ osrs-gpt-companion/
 ├── launcher.py          # Windows PATH
 ├── pyproject.toml       # Console entry points
 ├── ui/                  # HTML / CSS / JS
+├── test_frontend.py     # Optional JS rendering tests
+├── tests/ui.test.cjs     # Synthetic DOM, no browser
 ├── test_web_app.py      # Local API tests
 ├── test_app_shell.py    # Freshness + launchers
 ├── main.py              # Consola y ciclo de vida del monitor
@@ -365,6 +389,10 @@ Las pruebas de DPAPI requieren acceso al perfil de cifrado del usuario de Window
 El cliente admite conexiones que omiten `Content-Type` si el cuerpo contiene
 eventos SSE válidos. Rechaza eventos malformados y respuestas sin confirmación
 de finalización; las llamadas de herramientas incompletas no se ejecutan.
+
+Opcionalmente, Node.js permite ejecutar siete pruebas adicionales de renderizado
+con un DOM sintético. No es necesario para instalar, compilar ni usar la aplicación.
+Si está disponible, `python -m unittest -v` ejecuta también esa comprobación.
 
 ## 📌 Alcance actual
 

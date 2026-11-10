@@ -35,6 +35,53 @@ function activity(title, sub, state) {
   row.append(node('strong', title), node('small', sub));
   return row;
 }
+function renderGear(stats, items, quests) {
+  $('equipment').replaceChildren(); $('ge-offers').replaceChildren();
+  $('slayer').replaceChildren(); $('quest-progress').replaceChildren();
+  $('combat-progress').replaceChildren(); $('kill-counts').replaceChildren();
+  Object.entries(items.ok ? items.equipment || {} : {}).forEach(([slot,item]) => {
+    if (!item || typeof item !== 'object' || (!item.name && !(item.itemId > 0))) return;
+    const row = node('div',undefined,'gear-row');
+    row.append(node('small',slot.replaceAll('_',' ')),node('span',item.name || `Objeto #${item.itemId}`));
+    $('equipment').append(row);
+  });
+  if (!$('equipment').children.length) $('equipment').append(node('p',items.ok ? 'No hay equipo registrado.' : 'Equipo no disponible.','muted'));
+  const offers = items.ok && Array.isArray(items.grandExchange) ? items.grandExchange : [];
+  offers.filter(offer => offer && offer.state !== 'EMPTY' && (offer.name || offer.itemId > 0)).forEach(offer => {
+    const row = node('div',undefined,'ge-offer');
+    row.append(node('strong',offer.name || `Objeto #${offer.itemId}`),
+      node('small',`${offer.state || 'Sin estado'} · ${number(offer.quantitySold)}/${number(offer.totalQuantity)} @ ${number(offer.price)} GP`));
+    $('ge-offers').append(row);
+  });
+  if (!$('ge-offers').children.length) $('ge-offers').append(node('p',items.ok ? 'No hay ofertas activas.' : 'Ofertas no disponibles.','muted'));
+  const slayer = stats.ok ? stats.slayer || {} : {};
+  if (Object.keys(slayer).length) {
+    $('slayer').append(node('p',`${slayer.masterName || 'Maestro sin registrar'} · ${number(slayer.points)} puntos · Racha ${number(slayer.streak)}`,'progress-line'));
+    if (slayer.amount > 0) $('slayer').append(node('p',`Tarea activa: ${slayer.creatureName || slayer.taskName || 'ID ' + (slayer.creatureId ?? '—')} · ${number(slayer.amount)} restantes`,'progress-line'));
+  } else $('slayer').append(node('p','No hay datos de Slayer.','muted'));
+  if (quests.ok) {
+    $('quest-progress').append(node('strong','Misiones'),node('p',`${number(quests.finished_count)} completadas · ${number(quests.in_progress_count)} en curso · ${number(quests.not_started_count)} pendientes`));
+    const tiers = quests.combatAchievements?.tiers || {};
+    Object.entries(tiers).forEach(([tier,counts]) => {
+      if (!counts || typeof counts !== 'object') return;
+      const row = node('div',undefined,'tier-row');
+      row.append(node('span',tier),node('strong',`${number(counts.completed)} / ${number(counts.total)}`));
+      $('combat-progress').append(row);
+    });
+  } else $('quest-progress').append(node('p','Progreso de misiones no disponible.','muted'));
+  if (!$('combat-progress').children.length) $('combat-progress').append(node('p','No hay datos de Combat Achievements.','muted'));
+  Object.entries(stats.ok ? stats.killCounts || {} : {}).filter(([name,count]) => name !== '_omitted' && typeof count === 'number' && count > 0).sort((a,b) => b[1]-a[1]).forEach(([name,count]) => {
+    const row = node('div',undefined,'tier-row');
+    row.append(node('span',name),node('strong',number(count))); $('kill-counts').append(row);
+  });
+  if (!$('kill-counts').children.length) $('kill-counts').append(node('p','No hay KC registrados.','muted'));
+}
+function updateThinking(data) {
+  const thinking = document.querySelector('.thinking');
+  if (!thinking || !data.busy) return;
+  const names = Array.isArray(data.active_tools) ? data.active_tools.map(tool => tool?.name).filter(name => typeof name === 'string') : [];
+  thinking.textContent = names.length ? 'Consultando: ' + names.join(', ') + '…' : 'El compañero está preparando tu respuesta…';
+}
 async function refreshStatus() {
   try {
     const data = await api('/api/status');
@@ -69,6 +116,8 @@ async function refreshStatus() {
       if (house && typeof house === 'object') $('birdhouses').append(activity('Birdhouse · ' + (house.house || 'Trampa'), `${house.space || 'Fossil Island'} · ${house.state || 'Sin estado'}`, house.state));
     });
     if (!$('farming').children.length && !$('birdhouses').children.length) $('farming').append(node('p','No hay actividades registradas.','muted'));
+    renderGear(stats,items,data.quests || {});
+    updateThinking(data);
     refreshAges();
   } catch (_) {
     statusOk = false;
@@ -108,10 +157,20 @@ function inline(parent, text) {
 }
 function markdown(parent, text) {
   let code = null;
+  let list = null;
   for (const line of text.split('\n')) {
-    if (line.startsWith('```')) { code = code ? null : node('pre'); if (code) parent.append(code); continue; }
+    if (line.startsWith('```')) { list = null; code = code ? null : node('pre'); if (code) parent.append(code); continue; }
     if (code) { code.append(document.createTextNode(line+'\n')); continue; }
-    const paragraph = node('p'); inline(paragraph, line.replace(/^#{1,4}\s/,'')); parent.append(paragraph);
+    if (!line.trim()) { list = null; continue; }
+    const heading = line.match(/^#{1,3}\s+(.+)$/);
+    if (heading) { list = null; const title = node('h4'); inline(title,heading[1]); parent.append(title); continue; }
+    const item = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)$/);
+    if (item) {
+      if (!list) { list = node('ul'); parent.append(list); }
+      const entry = node('li'); inline(entry,item[1]); list.append(entry); continue;
+    }
+    list = null;
+    const paragraph = node('p'); inline(paragraph, line); parent.append(paragraph);
   }
 }
 function bubble(text, role, data) {
@@ -142,10 +201,29 @@ async function submit(message) {
   } catch(e) { error(e.message); }
   finally { waiting.remove(); busy = false; $('send').disabled = false; $('clear').disabled = false; $('message').focus(); }
 }
+function tab(selected) {
+  for (const name of ['state','gear','memory']) {
+    $(name+'-content').hidden = name !== selected;
+    $('tab-'+name).classList.toggle('selected',name === selected);
+    $('tab-'+name).setAttribute('aria-selected',String(name === selected));
+    $('tab-'+name).setAttribute('tabindex',name === selected ? '0' : '-1');
+  }
+  if (selected === 'memory') refreshMemories();
+}
 $('chat-form').addEventListener('submit',event => { event.preventDefault(); const text=$('message').value.trim(); if (!busy && text) { $('message').value=''; submit(text); } });
 $('message').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-form').requestSubmit(); } });
 $('clear').addEventListener('click',()=>submit('/limpiar'));
 document.querySelectorAll('[data-question]').forEach(button => button.addEventListener('click',()=>{ $('message').value=button.dataset.question; $('message').focus(); }));
-function tab(memory) { $('memory-content').hidden=!memory; $('state-content').hidden=memory; $('tab-memory').classList.toggle('selected',memory); $('tab-state').classList.toggle('selected',!memory); $('tab-memory').setAttribute('aria-selected',String(memory)); $('tab-state').setAttribute('aria-selected',String(!memory)); if(memory) refreshMemories(); }
-$('tab-state').addEventListener('click',()=>tab(false)); $('tab-memory').addEventListener('click',()=>tab(true));
+const tabs = ['state','gear','memory'];
+tabs.forEach((name,index) => {
+  $('tab-'+name).addEventListener('click',()=>tab(name));
+  $('tab-'+name).addEventListener('keydown',event => {
+    let target;
+    if (event.key === 'ArrowRight') target = tabs[(index+1)%tabs.length];
+    if (event.key === 'ArrowLeft') target = tabs[(index+tabs.length-1)%tabs.length];
+    if (event.key === 'Home') target = tabs[0];
+    if (event.key === 'End') target = tabs[tabs.length-1];
+    if (target) { event.preventDefault(); tab(target); $('tab-'+target).focus(); }
+  });
+});
 refreshStatus(); refreshMemories(); setInterval(refreshStatus,3000); setInterval(refreshAges,1000);

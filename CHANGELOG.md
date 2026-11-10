@@ -1,5 +1,25 @@
 # Historial de cambios
 
+## 0.4.1 — 2026-11-10
+
+### Añadido
+
+- Pestaña Equipo & Progreso con equipo ocupado, ofertas GE, Slayer, misiones, Combat Achievements y KC.
+- `busy` y `active_tools` en `/api/status`, protegidos por un lock independiente para permitir polling durante una respuesta.
+- Indicador del chat que muestra herramientas ya ejecutadas; limpieza al terminar, fallar o limpiar historial.
+- Listas y encabezados Markdown con nodos DOM seguros, sin párrafos vacíos redundantes y preservando bloques de código.
+- Navegación de las tres pestañas mediante teclado, pruebas de progreso concurrente y siete pruebas JavaScript de renderizado seguro.
+
+### Corregido
+
+- Eliminada la instrucción contradictoria de SYSTEM que pedía comprobar nombres de timestamps; la validación del estado es interna.
+
+### Conservado
+
+- `auth.py`, `state_monitor.py`, `tools.py`, `wiki_client.py`, `memory_db.py` y `launcher.py` intactos.
+- CSP, CSRF, loopback, construcción segura de nodos DOM y protocolo SIWC sin cambios.
+
+
 ## 0.4.0 — 2026-11-09
 
 ### Añadido
