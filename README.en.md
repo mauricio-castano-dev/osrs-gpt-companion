@@ -135,9 +135,9 @@ Functions are grouped in the `osrs` namespace with strict JSON schemas.
 
 | Tool | Purpose |
 | --- | --- |
-| `query_player_stats` | Selected skills, basic identity, and vitals; optional Slayer, daily activity, and timer summaries. |
-| `query_player_bank` | Search bank/inventory by name or ID; inspect equipment and Coins/Platinum token liquidity. |
-| `query_quests_and_diaries` | Quests and diaries filtered by name, category, and status, with overall counts. |
+| `query_player_stats` | Skills, world, quick prayers, and vitals; optional active farming, birdhouses, unlocked prayers, KC, POH, transport, and minigame data. |
+| `query_player_bank` | Search items and inspect equipment and liquidity; `source=all` or `bank` includes up to eight personal GE offers. |
+| `query_quests_and_diaries` | Quests, diaries, and `combat_achievements`: tier summaries and up to 25 combat tasks only for a specific search. |
 | `check_ge_price` | Fetch observed Grand Exchange prices and the time of each observation. |
 | `search_osrs_wiki` | Find OSRS Wiki pages and retrieve a verifiable introduction with its link. |
 | `save_agent_memory` | Save goals, preferences, and plans expressed by the user. |
@@ -156,8 +156,29 @@ only. Missing values are distinguished from a known zero.
 Prices come from the OSRS Wiki API, with up to five matches and their timestamps.
 The item catalog is cached in RAM for **six hours**. Wiki search returns up to
 three links and a plain-text introduction from the first page, within an overall
-budget of approximately **2.5 KB**. Introductions may omit requirements or drop
-tables. Calls use a descriptive `User-Agent` and a session without OpenAI credentials.
+budget of **2,500 bytes**. Redirects are resolved; introductions shorter than
+250 characters trigger an additional extract of the first sections. The extract
+may still omit requirements or drop tables. Calls use a descriptive `User-Agent` and a session without OpenAI credentials.
+
+
+### Farming and additional progress
+
+With `include_slayer_and_timers=true`, farming filters active patches before
+applying limits: it omits `EMPTY`, `Weeds`, and `Compost Bin`, returning up to
+**25 patches** with `active_count`, `empty_omitted_count`, `total_patches`, and
+`truncated`. `HARVESTABLE`, `DEAD`, and `GROWING` crops are no longer hidden behind
+empty patches. Up to eight structured birdhouses are preserved in full. Older
+timer formats retain the generic summary of up to 12 entries.
+
+Extras include `killCounts`, `activityCounts`, `minigamePoints`, `house`,
+`transport`, and `location`. Unlocked prayers appear in `prayers`, outside
+`player`. GE offers are the character's offers exported by Character Snapshot;
+they do not replace a query for current market prices.
+
+For Combat Achievements use `category="combat_achievements"`. Without a
+`search_term`, only the six-tier summary and points are returned. A search by
+task, monster, or tier returns up to **25 tasks**, respecting `status_filter`.
+`category="all"` also includes the summary. The full task catalog is never sent.
 
 ## ⌨️ Commands
 

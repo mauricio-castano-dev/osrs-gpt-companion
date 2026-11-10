@@ -110,12 +110,18 @@ class StateMonitor(FileSystemEventHandler):
             for name, value in state.get('skills', {}).items():
                 if not wanted or name.casefold() in wanted:
                     skills[name] = project(value, ('level', 'xp', 'boostedLevel')) if isinstance(value, dict) else value
-            result.update(player=project(player, ('username', 'combatLevel', 'accountType', 'members', 'spellbook')),
+            result.update(player=project(player, ('username', 'combatLevel', 'accountType', 'members', 'spellbook', 'world', 'quickPrayers')),
                           skills=skills, vitals=compact(state.get('vitals', {})),
                           questPoints=state.get('questPoints'))
             if include_slayer_and_timers:
-                for key in ('slayer', 'dailies', 'toolLeprechaunTotals', 'timers'):
+                for key in ('slayer', 'dailies', 'toolLeprechaunTotals', 'killCounts', 'activityCounts',
+                            'minigamePoints', 'house', 'transport', 'location'):
                     result[key] = compact(state.get(key, {}))
+                result['timers'] = compact_timers(state.get('timers', {}))
+                if 'unlockedPrayers' in player:
+                    prayers = player['unlockedPrayers']
+                    result['prayers'] = {'unlockedPrayers': copy.deepcopy(prayers[:64]),
+                                         'total': len(prayers), 'truncated': len(prayers) > 64}
             return copy.deepcopy(result)
 
     def query_items(self, search_term, source):
@@ -138,6 +144,9 @@ class StateMonitor(FileSystemEventHandler):
                 'inventory': currency(inventory) if 'inventory' in state else None,
             }
             if source in ('all', 'bank'):
+                if 'grandExchange' in state:
+                    offers = state['grandExchange']
+                    result['grandExchange'] = [project(offer, GE_FIELDS) for offer in offers[:8]]
                 found = [item for item in bank_items if matches(item)] if term else []
                 result['bank'] = {
                     'bank_total_items': bank.get('totalItems', len(bank_items)),
@@ -155,7 +164,7 @@ class StateMonitor(FileSystemEventHandler):
             return copy.deepcopy(result)
 
     def query_quests_diaries(self, search_term, category, status_filter):
-        if category not in ('all', 'quests', 'diaries') or status_filter not in ('all', 'completed', 'incomplete', 'in_progress'):
+        if category not in ('all', 'quests', 'diaries', 'combat_achievements') or status_filter not in ('all', 'completed', 'incomplete', 'in_progress'):
             raise ValueError('category o status_filter invalido.')
         with self._lock:
             result = self._meta_or_error()
@@ -205,6 +214,9 @@ class StateMonitor(FileSystemEventHandler):
                                      total_matches=len(details), truncated=len(details) > 30)
                     diaries[region] = entry
                 result['achievementDiaries'] = diaries
+            if category in ('all', 'combat_achievements'):
+                result['combatAchievements'] = compact_combat_achievements(
+                    state.get('combatAchievements', {}), term, status_filter)
             return copy.deepcopy(result)
 
     def __enter__(self):
@@ -230,7 +242,10 @@ class StateMonitor(FileSystemEventHandler):
 
 
 ITEM_FIELDS = ('slot', 'itemId', 'name', 'quantity')
+GE_FIELDS = ('slot', 'itemId', 'name', 'state', 'quantitySold', 'totalQuantity', 'price', 'spent')
+PATCH_FIELDS = ('patch', 'region', 'type', 'crop', 'state', 'stage', 'stages', 'readyAt', 'lastChecked')
 TIERS = ('easy', 'medium', 'hard', 'elite')
+COMBAT_TIERS = ('EASY', 'MEDIUM', 'HARD', 'ELITE', 'MASTER', 'GRANDMASTER')
 
 
 def project(value, fields):
@@ -253,6 +268,57 @@ def compact(value, depth=0):
             'total': len(value), 'truncated': len(value) > 12,
         }
     return value[:300] if isinstance(value, str) else value
+
+
+def compact_timers(timers):
+    """Prioriza parches activos antes de limitar; preserva fixtures no estructurados."""
+    result = compact(timers)
+    if not isinstance(timers, dict):
+        return result
+    farming = timers.get('farming')
+    if isinstance(farming, list) and all(isinstance(patch, dict) for patch in farming):
+        active = [patch for patch in farming if patch.get('state') != 'EMPTY'
+                  and patch.get('crop') not in ('Weeds', 'Compost Bin')]
+        result['farming'] = {
+            'entries': [project(patch, PATCH_FIELDS) for patch in active[:25]],
+            'active_count': len(active), 'empty_omitted_count': len(farming) - len(active),
+            'total_patches': len(farming), 'truncated': len(active) > 25,
+        }
+    birdhouses = timers.get('birdhouses')
+    if isinstance(birdhouses, list):
+        result['birdhouses'] = (copy.deepcopy(birdhouses) if len(birdhouses) <= 8
+                               and all(isinstance(house, dict) for house in birdhouses)
+                               else compact(birdhouses, depth=1))
+    return result
+
+
+def compact_combat_achievements(achievements, search_term, status_filter):
+    """Resumen de seis tiers; detalles solo por busqueda especifica, nunca el catalogo."""
+    if not isinstance(achievements, dict):
+        return {'available': False}
+    tasks = [task for task in achievements.get('tasks', []) if isinstance(task, dict)]
+    tiers = {}
+    for tier in COMBAT_TIERS:
+        exported = achievements.get('tierCounts', {}).get(tier)
+        if isinstance(exported, dict):
+            tiers[tier] = project(exported, ('completed', 'total'))
+        elif 'tasks' in achievements:
+            tier_tasks = [task for task in tasks if str(task.get('tier', '')).upper() == tier]
+            tiers[tier] = {'completed': sum(task.get('completed') is True for task in tier_tasks),
+                           'total': len(tier_tasks)}
+    result = {'available': bool(achievements), 'tiers': tiers,
+              **project(achievements, ('points', 'tierEasy', 'tierMedium', 'tierHard', 'tierElite',
+                                       'tierMaster', 'tierGrandmaster', 'easyComplete', 'mediumComplete',
+                                       'hardComplete', 'eliteComplete', 'masterComplete', 'grandmasterComplete'))}
+    if search_term:
+        matches = [task for task in tasks
+                   if any(search_term in str(task.get(field, '')).casefold() for field in ('id', 'name', 'monster', 'tier'))
+                   and (status_filter == 'all'
+                        or (status_filter == 'completed' and task.get('completed') is True)
+                        or (status_filter == 'incomplete' and task.get('completed') is False))]
+        result.update(tasks=[project(task, ('id', 'name', 'tier', 'monster', 'completed')) for task in matches[:25]],
+                      total_matches=len(matches), truncated=len(matches) > 25)
+    return result
 
 
 def currency(items):

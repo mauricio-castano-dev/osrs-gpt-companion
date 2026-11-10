@@ -83,7 +83,7 @@ class WikiTests(unittest.TestCase):
             self.assertEqual(self.client.search_osrs_wiki('nothing')['results'], [])
             self.assertEqual(send.call_count, 1)
         hits = {'query': {'search': [{'pageid': 1, 'title': 'Quest'}]}}
-        with patch.object(self.client.http, 'send', side_effect=[response(hits), response({'query': {'pages': {'1': {'extract': 'Short text'}}}})]):
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response({'query': {'pages': {'1': {'extract': 'Short text'}}}}), response({'query': {'pages': {'1': {'extract': 'Short text'}}}})]):
             result = self.client.search_osrs_wiki('quest')
             self.assertEqual(result['extract'], 'Short text')
             self.assertFalse(result['truncated'])
@@ -100,6 +100,51 @@ class WikiTests(unittest.TestCase):
         with patch.object(self.client.http, 'send', return_value=response({'not': 'a list'})):
             with self.assertRaises(WikiError):
                 self.client.check_ge_price('ore')
+
+    def test_short_intro_expands_sections_follows_redirect_and_preserves_budget(self):
+        hits = {'query': {'search': [{'pageid': 1, 'title': 'Quest redirect'}]}}
+        short = {'query': {'pages': {'2': {'pageid': 2, 'extract': 'Short introduction.'}}}}
+        expanded = 'Requirements: ' + 'á界"\\\n' * 1000
+        sections = {'query': {'pages': {'2': {'pageid': 2, 'extract': expanded}}}}
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response(short), response(sections)]) as send:
+            result = self.client.search_osrs_wiki('Quest redirect')
+            self.assertTrue(result['extract'].startswith('Requirements:'))
+            self.assertEqual(send.call_count, 3)
+            intro_query = parse_qs(urlsplit(send.call_args_list[1].args[0].url).query)
+            full_query = parse_qs(urlsplit(send.call_args_list[2].args[0].url).query)
+            self.assertEqual(intro_query['redirects'], ['1'])
+            self.assertEqual(full_query['redirects'], ['1'])
+            self.assertEqual(full_query['pageids'], ['2'])
+            self.assertNotIn('exintro', full_query)
+            self.assertEqual(full_query['exchars'], ['2500'])
+            self.assertTrue(result['results'][0]['url'].endswith('curid=2'))
+            self.assertLessEqual(len(json.dumps(result, ensure_ascii=False).encode('utf-8')), WIKI_BUDGET)
+            self.assert_public_requests(send)
+
+    def test_long_intro_skips_expansion_and_short_expansion_never_discards_intro(self):
+        hits = {'query': {'search': [{'pageid': 1, 'title': 'Quest'}]}}
+        long_intro = {'query': {'pages': {'1': {'extract': 'a' * 250}}}}
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response(long_intro)]) as send:
+            self.assertEqual(len(self.client.search_osrs_wiki('quest')['extract']), 250)
+            self.assertEqual(send.call_count, 2)
+        intro = {'query': {'pages': {'1': {'extract': 'A useful short intro'}}}}
+        full = {'query': {'pages': {'1': {'extract': 'Shorter'}}}}
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response(intro), response(full)]):
+            self.assertEqual(self.client.search_osrs_wiki('quest')['extract'], 'A useful short intro')
+
+    def test_expansion_api_failure_is_explicit(self):
+        hits = {'query': {'search': [{'pageid': 1, 'title': 'Quest'}]}}
+        intro = {'query': {'pages': {'1': {'extract': 'Short intro'}}}}
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response(intro), requests.Timeout()]):
+            with self.assertRaises(WikiError):
+                self.client.search_osrs_wiki('quest')
+
+    def test_empty_intro_can_recover_requirements_from_sections(self):
+        hits = {'query': {'search': [{'pageid': 1, 'title': 'Quest'}]}}
+        intro = {'query': {'pages': {'1': {'extract': ''}}}}
+        full = {'query': {'pages': {'1': {'extract': 'Requirements: example skill level.'}}}}
+        with patch.object(self.client.http, 'send', side_effect=[response(hits), response(intro), response(full)]):
+            self.assertTrue(self.client.search_osrs_wiki('quest')['extract'].startswith('Requirements:'))
 
 
 if __name__ == '__main__':

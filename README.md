@@ -138,9 +138,9 @@ Las funciones se agrupan en el namespace `osrs`, con esquemas JSON estrictos.
 
 | Herramienta | Propósito |
 | --- | --- |
-| `query_player_stats` | Habilidades seleccionadas, identidad básica y vitales; resúmenes opcionales de Slayer, dailies y timers. |
-| `query_player_bank` | Buscar por nombre o ID en banco/inventario; consultar equipo y liquidez en Coins y Platinum tokens. |
-| `query_quests_and_diaries` | Misiones y diarios filtrados por nombre, categoría y estado, con conteos globales. |
+| `query_player_stats` | Habilidades, mundo, quick prayers y vitales; extras opcionales de farming activo, birdhouses, oraciones desbloqueadas, KC, POH, transporte y minijuegos. |
+| `query_player_bank` | Buscar objetos y consultar equipo y liquidez; `source=all` o `bank` incluye hasta ocho ofertas personales del GE. |
+| `query_quests_and_diaries` | Misiones, diarios y `combat_achievements`: resumen por tier y hasta 25 tareas de combate solo con una búsqueda específica. |
 | `check_ge_price` | Consultar precios observados del Grand Exchange y la fecha de cada observación. |
 | `search_osrs_wiki` | Buscar páginas de OSRS Wiki y consultar una introducción verificable con su enlace. |
 | `save_agent_memory` | Guardar metas, preferencias y planes expresados por el usuario. |
@@ -160,9 +160,30 @@ se distinguen de un valor conocido de cero.
 Los precios provienen de la API de OSRS Wiki, con hasta cinco coincidencias y
 sus timestamps; el catálogo de objetos se guarda en RAM durante **seis horas**.
 La búsqueda de wiki devuelve hasta tres enlaces y la introducción de la primera
-página en texto plano, con un presupuesto total aproximado de **2.5 KB**. La
-introducción puede no incluir todos los requisitos o tablas de drops. Las llamadas
+página en texto plano, dentro de **2.500 bytes** en total. Sigue redirecciones;
+si la introducción tiene menos de 250 caracteres, consulta también las primeras
+secciones. El extracto puede no incluir todos los requisitos o tablas de drops. Las llamadas
 usan un `User-Agent` descriptivo y una sesión sin credenciales de OpenAI.
+
+
+### Farming y progreso adicional
+
+Con `include_slayer_and_timers=true`, farming filtra primero los parches activos:
+omite `EMPTY`, `Weeds` y `Compost Bin`, y devuelve hasta **25 parches**, con
+`active_count`, `empty_omitted_count`, `total_patches` y `truncated`. Así no se
+ocultan cultivos `HARVESTABLE`, `DEAD` o `GROWING` detrás de parches vacíos.
+Hasta ocho birdhouses estructuradas se conservan completas. Los formatos de
+timers anteriores mantienen el resumen genérico de hasta 12 entradas.
+
+Los extras incluyen `killCounts`, `activityCounts`, `minigamePoints`, `house`,
+`transport` y `location`; las oraciones desbloqueadas se exponen en `prayers`,
+fuera de `player`. Las ofertas del GE son las del personaje exportadas por
+Character Snapshot: no reemplazan la consulta de precios actuales de mercado.
+
+Para Combat Achievements usa `category="combat_achievements"`. Sin `search_term`
+solo se devuelve el resumen de seis tiers y puntos. Con un término por tarea,
+monstruo o tier se devuelven hasta **25 tareas**, respetando `status_filter`.
+`category="all"` también incluye ese resumen. Nunca se envía el catálogo completo.
 
 ## ⌨️ Comandos
 

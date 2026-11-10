@@ -1,5 +1,25 @@
 # Historial de cambios
 
+## 0.2.1 — 2026-11-09
+
+### Corregido
+
+- Farming selecciona parches activos antes de limitar a 25; informa activos, vacíos omitidos y total de parches.
+- Birdhouses estructuradas pequeñas se conservan completas; fixtures y formatos anteriores siguen siendo compatibles.
+- Extractos de wiki resuelven redirecciones y amplían introducciones menores de 250 caracteres con las primeras secciones, sin superar 2.500 bytes.
+
+### Añadido
+
+- Mundo y quick prayers; oraciones desbloqueadas y resúmenes de KC, actividades, minijuegos, POH, transporte y ubicación entre los extras de estadísticas.
+- Hasta ocho ofertas personales del Grand Exchange en consultas de banco/all.
+- Categoría `combat_achievements`: resumen por tier y hasta 25 tareas filtradas, nunca el catálogo completo.
+- Pruebas adicionales con fixtures estructurados como Character Snapshot y documentación sincronizada en tres idiomas.
+
+### Conservado
+
+- `auth.py` e `inference.py` sin modificaciones; siete herramientas y protocolo SIWC intactos.
+
+
 ## 0.2.0 — 2026-11-09
 
 ### Añadido

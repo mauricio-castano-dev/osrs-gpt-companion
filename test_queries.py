@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import memory_db
 import tools
-from state_monitor import StateMonitor
+from state_monitor import StateMonitor, compact_timers
 
 
 def fixture():
@@ -182,6 +182,113 @@ class RouterTests(unittest.TestCase):
         ]
         for name, args in bad:
             self.assertFalse(self.call(router, name, **args)['ok'])
+
+
+class RealSchemaTests(unittest.TestCase):
+    def setUp(self):
+        self.monitor = StateMonitor('unused.json')
+        self.monitor._state = fixture()
+        self.monitor._pending = False
+        self.monitor._error = None
+
+    def test_farming_filters_before_limiting_and_exposes_small_extras(self):
+        empty = [{'patch': f'Empty {i}', 'crop': 'Weeds', 'state': 'EMPTY'} for i in range(56)]
+        empty += [{'crop': 'Compost Bin', 'state': 'GROWING'}, {'crop': 'Weeds', 'state': 'GROWING'}]
+        active = [{'patch': f'Patch {i}', 'region': 'Example region', 'type': 'HERB',
+                   'crop': 'Torstol' if i < 7 else 'Papaya',
+                   'state': ('HARVESTABLE', 'DEAD', 'GROWING')[i % 3],
+                   'stage': 4, 'stages': 5, 'readyAt': 123, 'lastChecked': 100,
+                   'unused': 'must not be returned'} for i in range(20)]
+        houses = [{'space': f'Space {i}', 'house': 'Yew', 'state': 'READY', 'readyAt': 123,
+                   'lastChecked': 100} for i in range(4)]
+        state = self.monitor._state
+        state['timers'] = {'farming': empty + active, 'birdhouses': houses}
+        state['player'].update(world=330, quickPrayers=['PROTECT_FROM_MELEE'], unlockedPrayers=['PIETY'])
+        for key, value in {'killCounts': {'example boss': 5}, 'house': {'location': 1, 'jewelleryBox': 2},
+                           'transport': {'fairyRings': True}, 'location': {'regionId': 1, 'x': 2, 'y': 3, 'plane': 0},
+                           'activityCounts': {'example activity': 2}, 'minigamePoints': {'example points': 3}}.items():
+            state[key] = value
+        with patch.object(Path, 'open', side_effect=AssertionError('No disk per query')):
+            result = self.monitor.query_stats([], True)
+        farming = result['timers']['farming']
+        self.assertEqual((farming['total_patches'], farming['active_count'], farming['empty_omitted_count']), (78, 20, 58))
+        self.assertEqual(len(farming['entries']), 20)
+        self.assertEqual({p['state'] for p in farming['entries']}, {'HARVESTABLE', 'DEAD', 'GROWING'})
+        self.assertTrue(all('unused' not in p for p in farming['entries']))
+        self.assertEqual(result['timers']['birdhouses'], houses)
+        self.assertEqual(result['killCounts']['example boss'], 5)
+        self.assertEqual(result['house']['jewelleryBox'], 2)
+        self.assertTrue(result['transport']['fairyRings'])
+        self.assertEqual(result['player']['world'], 330)
+        self.assertEqual(result['player']['quickPrayers'], ['PROTECT_FROM_MELEE'])
+        self.assertNotIn('unlockedPrayers', result['player'])
+        self.assertEqual(result['prayers']['unlockedPrayers'], ['PIETY'])
+        result['timers']['birdhouses'][0]['state'] = 'changed'
+        self.assertEqual(state['timers']['birdhouses'][0]['state'], 'READY')
+        minimal = self.monitor.query_stats([], False)
+        for key in ('prayers', 'killCounts', 'house', 'transport', 'timers'):
+            self.assertNotIn(key, minimal)
+
+    def test_timer_limits_mixed_legacy_values_and_empty_lists(self):
+        patches = [{'patch': str(i), 'crop': 'Yew', 'state': 'GROWING'} for i in range(40)]
+        result = compact_timers({'farming': patches, 'birdhouses': [{'state': 'READY'}] * 20})
+        self.assertEqual(result['farming']['active_count'], 40)
+        self.assertEqual(len(result['farming']['entries']), 25)
+        self.assertTrue(result['farming']['truncated'])
+        self.assertEqual(len(result['birdhouses']['entries']), 12)
+        self.assertTrue(result['birdhouses']['truncated'])
+        for farming in (list(range(100)), [{'state': 'GROWING'}, 1]):
+            result = compact_timers({'farming': farming})
+            self.assertEqual(result['farming']['total'], len(farming))
+        self.assertEqual(compact_timers({'farming': []})['farming']['active_count'], 0)
+        self.assertEqual(compact_timers({'birdhouses': []})['birdhouses'], [])
+
+    def test_ge_offers_are_projected_and_capped_at_eight(self):
+        state = self.monitor._state
+        state['grandExchange'] = [{'slot': i, 'itemId': 1, 'name': 'Example item', 'state': 'BUYING',
+                                  'quantitySold': 5, 'totalQuantity': 10, 'price': 100, 'spent': 500,
+                                  'unused': 'not needed'} for i in range(10)]
+        for source in ('all', 'bank'):
+            result = self.monitor.query_items('', source)
+            self.assertEqual(len(result['grandExchange']), 8)
+            self.assertEqual(result['grandExchange'][0]['spent'], 500)
+            self.assertNotIn('unused', result['grandExchange'][0])
+            self.assertNotIn('items', result['bank'])
+        self.assertNotIn('grandExchange', self.monitor.query_items('', 'inventory'))
+
+    def test_combat_summary_and_specific_search_never_dump_full_task_catalog(self):
+        tasks = [{'id': i, 'name': f'Boss challenge {i}', 'tier': ('EASY', 'HARD')[i % 2],
+                  'monster': 'Example boss', 'completed': i % 3 == 0,
+                  'unused': 'must not return'} for i in range(655)]
+        state = self.monitor._state
+        state['combatAchievements'] = {'tasks': tasks, 'points': 42, 'tierEasy': 5,
+                                       'completedTasks': [str(i) for i in range(200)],
+                                       'tierCounts': {'EASY': {'completed': 7, 'total': 100}}}
+        for category in ('all', 'combat_achievements'):
+            result = self.monitor.query_quests_diaries('', category, 'all')['combatAchievements']
+            self.assertNotIn('tasks', result)
+            self.assertNotIn('completedTasks', result)
+            self.assertEqual(result['tiers']['EASY'], {'completed': 7, 'total': 100})
+            self.assertIn('HARD', result['tiers'])
+            self.assertEqual(result['points'], 42)
+            self.assertLess(len(json.dumps(result).encode()), 2000)
+        result = self.monitor.query_quests_diaries('example boss', 'combat_achievements', 'incomplete')
+        self.assertNotIn('quests', result)
+        detail = result['combatAchievements']
+        self.assertEqual(len(detail['tasks']), 25)
+        self.assertTrue(all(t['completed'] is False and 'unused' not in t for t in detail['tasks']))
+        self.assertTrue(detail['truncated'])
+        self.assertLess(len(json.dumps(result).encode()), 8000)
+        result = self.monitor.query_quests_diaries('challenge 654', 'combat_achievements', 'completed')
+        self.assertEqual([t['id'] for t in result['combatAchievements']['tasks']], [654])
+        router = tools.ToolRouter(self.monitor)
+        routed = router.execute({'name': 'query_quests_and_diaries', 'arguments': json.dumps({
+            'search_term': 'challenge 654', 'category': 'combat_achievements', 'status_filter': 'completed'})})
+        self.assertTrue(routed['ok'])
+        self.monitor._pending = True
+        stale = self.monitor.query_quests_diaries('boss', 'combat_achievements', 'all')
+        self.assertFalse(stale['ok'])
+        self.assertNotIn('combatAchievements', stale)
 
 
 class MemoryTokenTests(unittest.TestCase):

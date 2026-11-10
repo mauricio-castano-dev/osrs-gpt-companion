@@ -114,18 +114,12 @@ class WikiClient:
         result = {'ok': True, 'results': results, 'extract': '', 'truncated': False}
         if not hits:
             return result
-        data = self._get(WIKI_API, {'action': 'query', 'prop': 'extracts', 'pageids': hits[0]['pageid'],
-                                    'exintro': 1, 'explaintext': 1, 'exchars': 2500, 'format': 'json'})
-        query_data = data.get('query') if isinstance(data, dict) else None
-        if not isinstance(query_data, dict) or not isinstance(query_data.get('pages'), dict):
-            raise WikiError('Respuesta de extracto invalida.')
-        page = query_data['pages'].get(str(hits[0]['pageid']), {})
-        if not isinstance(page, dict):
-            raise WikiError('Pagina de extracto invalida.')
-        extract = page.get('extract')
-        if not isinstance(extract, str) or not extract.strip():
-            raise WikiError('OSRS Wiki no devolvio un extracto verificable de la pagina principal.')
-        extract = plain(extract)
+        extract, page_id = self._extract(hits[0]['pageid'], intro=True)
+        if len(extract) < 250:
+            expanded, expanded_id = self._extract(page_id, intro=False)
+            if len(expanded) > len(extract):
+                extract, page_id = expanded, expanded_id
+        result['results'][0]['url'] = f'https://oldschool.runescape.wiki/?curid={page_id}'
         result['truncated'] = True
         # Incluye metadatos, enlaces y escapes JSON en el presupuesto completo.
         overhead = len(json.dumps({**result, 'truncated': False}, ensure_ascii=False).encode('utf-8'))
@@ -138,6 +132,30 @@ class WikiClient:
             result['extract'] = candidate
         result['truncated'] = candidate != extract or len(extract) >= 2500
         return result
+
+    def _extract(self, page_id, intro):
+        params = {'action': 'query', 'prop': 'extracts', 'pageids': page_id,
+                  'explaintext': 1, 'exchars': 2500, 'redirects': 1, 'format': 'json'}
+        if intro:
+            params['exintro'] = 1
+        data = self._get(WIKI_API, params)
+        query_data = data.get('query') if isinstance(data, dict) else None
+        if not isinstance(query_data, dict) or not isinstance(query_data.get('pages'), dict):
+            raise WikiError('Respuesta de extracto invalida.')
+        # redirects=1 puede cambiar la clave de la pagina respecto al ID buscado.
+        pages = query_data['pages']
+        if len(pages) != 1:
+            raise WikiError('No se pudo identificar una pagina unica para el extracto.')
+        key, page = next(iter(pages.items()))
+        if not isinstance(page, dict) or 'missing' in page:
+            raise WikiError('Pagina de extracto invalida.')
+        extract = page.get('extract')
+        if not isinstance(extract, str) or (not intro and not extract.strip()):
+            raise WikiError('OSRS Wiki no devolvio un extracto verificable de la pagina principal.')
+        resolved_id = page.get('pageid', int(key) if str(key).isdecimal() else page_id)
+        if not isinstance(resolved_id, int) or resolved_id <= 0:
+            raise WikiError('Identificador de pagina invalido.')
+        return plain(extract), resolved_id
 
 
 CLIENT = WikiClient()
