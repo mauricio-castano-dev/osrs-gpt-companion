@@ -31,7 +31,11 @@ dist/
 # Archivos locales de trabajo y exportaciones duplicadas
 backups/
 PROMPT.md
+patches_propuestos.md
 CODIGO_COMPLETO.md
+# Lanzadores generados con rutas personales absolutas
+/osrs-companion.cmd
+/osrs-companion-ui.cmd
 *.log
 .vscode/
 .idea/

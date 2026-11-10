@@ -1,5 +1,24 @@
 # Historial de cambios
 
+## 0.4.0 — 2026-11-09
+
+### Añadido
+
+- Interfaz local de estilo OSRS con HUD actualizado cada tres segundos, skills, farming, birdhouses, chat y gestión de memorias.
+- API loopback con validación Host/Origin, CSRF por sesión, respuestas sin caché y chat serializado.
+- Chips de herramientas y pies discretos de tiempo relativo en UI y consola.
+- Empaquetado editable con `osrs-companion` y `osrs-companion-ui`; UI por defecto, `--cli`, `--ui` y `--port`.
+- Instalador idempotente `--install-path` que genera lanzadores absolutos y añade un directorio bin al PATH del usuario Windows.
+- Pruebas de endpoints, origen/CSRF, puertos ocupados, tiempos relativos y lanzadores.
+
+### Cambiado
+
+- Instrucciones del agente para contestar de forma concisa y no recitar timestamps salvo petición explícita o estado no disponible.
+- El respaldo entre las dos rutas históricas de estado elige el archivo más reciente por `st_mtime_ns`; la ruta explícita o guardada conserva su prioridad.
+- `patches_propuestos.md` y lanzadores generados con rutas personales excluidos de Git.
+- README sincronizados en español, inglés y portugués de Brasil, y exportación local del código actualizada.
+
+
 ## 0.3.0 — 2026-11-09
 
 ### Añadido

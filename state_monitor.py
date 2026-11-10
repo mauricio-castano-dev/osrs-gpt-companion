@@ -4,6 +4,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -11,7 +12,34 @@ from watchdog.observers import Observer
 
 def default_state_path():
     exported = Path.home() / '.runelite' / 'osrs-companion' / 'kpn_hooligan.json'
-    return exported if exported.exists() else Path(__file__).parent / 'kpn_hooligan.json'
+    local = Path(__file__).resolve().parent / 'kpn_hooligan.json'
+    candidates = []
+    for path in (local, exported):
+        try:
+            if path.is_file():
+                candidates.append((path.stat().st_mtime_ns, path))
+        except OSError:
+            continue
+    return max(candidates, key=lambda item: item[0])[1] if candidates else local
+
+
+def format_relative_time(iso_timestamp):
+    if not isinstance(iso_timestamp, str):
+        return 'sin fecha'
+    try:
+        timestamp = datetime.fromisoformat(iso_timestamp.replace('Z', '+00:00'))
+        if timestamp.tzinfo is None:
+            return 'sin fecha'
+        seconds = max(0, int((datetime.now(timezone.utc) - timestamp).total_seconds()))
+    except (ValueError, OverflowError):
+        return 'sin fecha'
+    if seconds < 60:
+        return f'hace {seconds} s'
+    if seconds < 3600:
+        return f'hace {seconds // 60} min'
+    if seconds < 86400:
+        return f'hace {seconds // 3600} h'
+    return f'hace {seconds // 86400} d'
 
 
 class StateMonitor(FileSystemEventHandler):
@@ -97,6 +125,11 @@ class StateMonitor(FileSystemEventHandler):
                 'lastUpdated': state.get('lastUpdated'),
                 'sectionUpdated': copy.deepcopy(state.get('sectionUpdated', {})),
             }
+
+    def freshness_summary(self):
+        meta = self._meta_or_error()
+        return {'ok': meta['ok'], 'lastUpdated': meta['lastUpdated'],
+                'freshness': format_relative_time(meta['lastUpdated'])}
 
     def query_stats(self, skills_filter, include_slayer_and_timers):
         with self._lock:

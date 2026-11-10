@@ -6,7 +6,7 @@
 
 **Your character, your goals, and an agent that remembers how you like to play.**
 
-A Python console assistant for **Old School RuneScape**, using character data
+A Python assistant for **Old School RuneScape**, with an OSRS-style local interface and console, using character data
 exported by RuneLite's **Character Snapshot** plugin, local memory, and tools
 the model can call during a conversation.
 
@@ -66,11 +66,29 @@ git clone https://github.com/mauricio-castano-dev/osrs-gpt-companion.git
 Set-Location osrs-gpt-companion
 
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py --init
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe main.py --install-path
 ```
 
 You do not need to activate the environment or configure `OPENAI_API_KEY`.
+
+### Launch from any folder
+
+After installing the launchers, **open a new terminal** so Windows loads the
+updated PATH. From any folder, use:
+
+```powershell
+osrs-companion
+osrs-companion-ui
+osrs-companion --cli
+```
+
+`osrs-companion` opens the browser interface by default. `--cli` keeps console
+chat available. You can also double-click `osrs-companion-ui.cmd` in the project
+folder. Launchers use absolute paths to `.venv` Python and `main.py`, and are
+also installed in `%LOCALAPPDATA%\OSRSGPTCompanion\bin`. The installer adds
+that folder to your user PATH idempotently, preserving other entries. Run the
+installer again if you move the project.
 
 ### Configure Character Snapshot and connect your character
 
@@ -83,7 +101,7 @@ For example, if you choose `C:\OSRS\Snapshots` and your character is called
 `ExamplePlayer`, the file will be `C:\OSRS\Snapshots\ExamplePlayer.json`:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
 
 Replace both the folder and `ExamplePlayer` with your actual export values.
@@ -97,7 +115,7 @@ Eligibility, models, and limits depend on your account and granted permissions.
 To check the installation with **fictional data**, without signing in:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --check-state --state-file .\examples\player.example.json
+osrs-companion --check-state --state-file .\examples\player.example.json
 ```
 
 `examples/player.example.json` contains fictional data for checking installation.
@@ -111,13 +129,13 @@ valid path you explicitly select is saved for future launches.
 flowchart LR
     R[Character Snapshot · character JSON] --> W[watchdog monitor]
     W --> C[State in memory]
-    U[Your question] --> A[Agent · Responses API]
+    U[Your question] --> A[UI or console chat · Responses API]
     A --> T[Local tools]
     T --> C
     T <--> M[(SQLite FTS5)]
     T --> E[OSRS Wiki · prices and search]
     T --> A
-    A --> F[Console response]
+    A --> F[Response and subtle report age]
 ```
 
 1. Character Snapshot exports data to your chosen folder. The monitor loads the selected JSON and updates the cache when it detects changes, including full file replacements.
@@ -195,16 +213,16 @@ task, monster, or tier returns up to **25 tasks**, respecting `status_filter`.
 
 ```powershell
 # Sign in or authorize again
-.\.venv\Scripts\python.exe main.py --login
+osrs-companion --login
 
 # List models available to your account
-.\.venv\Scripts\python.exe main.py --models
+osrs-companion --models
 
 # Choose a model and character file
-.\.venv\Scripts\python.exe main.py --model SLUG --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --model SLUG --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 
 # Validate the JSON without calling the model
-.\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
 
 
@@ -229,7 +247,7 @@ choices. Corrupted settings are ignored and can be replaced with valid options.
 After choosing the path and model, you can launch with:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
+osrs-companion
 ```
 
 ### Tool visibility and the interface hook
@@ -241,13 +259,50 @@ after execution. Structured errors report `False`; an already satisfied duplicat
 save remains successful. Unknown names use the local tool label and report
 `local`. Arguments are not logged. Repeated calls with the same ID are neither
 executed nor reported twice. Observer errors are reported without interrupting
-the turn. This hook supports a future interface; this version remains a console app.
+the turn. The OSRS interface uses this hook for each response's tool chips.
+
+### OSRS interface and report age
+
+The HUD shows character name, combat level, world, Quest Points, GP, skills,
+farming, and birdhouses. It refreshes every **3 seconds** through the local API
+without calling the model. Harvestable crops are green, growing crops amber,
+and dead crops red. The memory tab lets you forget a record with `✕`.
+
+Chat supports simple formatting, links, code blocks, tool chips, Enter to send,
+and Shift + Enter for a new line. Clearing chat preserves SQLite memories.
+Responses should be concise; timestamps stay out of the model's text unless
+you explicitly ask about them or the state is unavailable. Console replies have
+a dim `↳ Instantánea: hace 8 s` footer; the UI uses small text at 50–55 % opacity.
+
+The default address is `http://127.0.0.1:8765`; an occupied port falls back to a
+free one. Choose a port with `--port 9000` or request automatic allocation with
+`--port 0`. The server accepts loopback connections only, validates Host and
+Origin, requires a session CSRF token for POST/DELETE, and does not enable
+external CORS. Do not expose this desktop interface through port forwarding.
+
+| Local endpoint | Action |
+| --- | --- |
+| `GET /api/status` | Filtered RAM state, model, path, and relative age; no inference. |
+| `GET /api/memories` | Latest 30 local memories. |
+| `POST /api/memories/delete` | Delete `{ "id": 3 }`, with a CSRF token. |
+| `POST /api/chat` | Send `{ "message": "..." }`; receive the reply, used tools, and report age. |
+
+Chat history is serialized with a lock; a second simultaneous query returns 409.
+History remains temporary and is lost when the server closes. APIs and pages
+use `Cache-Control: no-store`. OpenAI tokens never reach the browser; the CSRF
+token is separate and exists only for the local server session.
 
 ## 🗂 Project structure
 
 ```text
 osrs-gpt-companion/
 ├── auth.py              # OAuth, PKCE, identity, DPAPI, and refresh
+├── web_app.py           # Loopback API + CSRF
+├── launcher.py          # Windows PATH
+├── pyproject.toml       # Console entry points
+├── ui/                  # HTML / CSS / JS
+├── test_web_app.py      # Local API tests
+├── test_app_shell.py    # Freshness + launchers
 ├── main.py              # Console and monitor lifecycle
 ├── inference.py         # Responses API, SSE, and tool loop
 ├── state_monitor.py     # JSON cache and file events
@@ -306,7 +361,7 @@ confirmation; incomplete tool calls are not executed.
 
 ## 📌 Current scope
 
-- Windows console interface and one ChatGPT profile per installation.
+- OSRS-style local interface and console for Windows; one ChatGPT profile per installation.
 - The file must contain a JSON object of up to **1 MiB**.
 - Tools expose filtered results. `snapshot()` remains available for local checks and is not exposed to the model. Required results are still sent again within a turn with `store: false`.
 - Preference changes are stored as new dated records.

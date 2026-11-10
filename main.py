@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sqlite3
 import sys
 import webbrowser
@@ -8,9 +9,29 @@ import requests
 from filelock import FileLock, Timeout
 from auth import AUTH_DIR, USAGE, CompanionError, atomic_write, host_id, load_profile, login, logout
 from inference import answer, list_models
-from state_monitor import StateMonitor, default_state_path
+from state_monitor import StateMonitor, default_state_path, format_relative_time
 from tools import ToolRouter
 from memory_db import list_memories, delete_memory
+
+
+def supports_ansi():
+    if not sys.stdout.isatty() or os.environ.get('TERM') == 'dumb':
+        return False
+    if sys.platform != 'win32':
+        return True
+    try:
+        import ctypes
+        mode = ctypes.c_ulong()
+        handle = ctypes.windll.kernel32.GetStdHandle(-11)
+        return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)) and mode.value & 4)
+    except (AttributeError, OSError):
+        return False
+
+
+def print_freshness(monitor):
+    stamp = monitor.freshness_summary().get('lastUpdated')
+    text = '  ↳ Instantánea: ' + format_relative_time(stamp)
+    print('\033[90m' + text + '\033[0m' if supports_ansi() else text)
 
 
 def load_settings():
@@ -133,6 +154,7 @@ def chat(model, monitor):
                 continue
             text = answer(question, model, history, router)
             print('Asistente:', text)
+            print_freshness(monitor)
             history.extend([{'role': 'user', 'content': question},
                             {'role': 'assistant', 'content': text}])
             history = history[-12:]
@@ -143,14 +165,29 @@ def chat(model, monitor):
             print('No se reintenta automaticamente. Las memorias guardadas antes del error se conservan.')
 
 
-def run():
+def run(default_ui=False, force_ui=False):
     parser = argparse.ArgumentParser(description='Agente OSRS con estado en vivo y memoria local')
     action = parser.add_mutually_exclusive_group()
     for flag in ('init', 'login', 'logout', 'models', 'check-state'):
         action.add_argument('--' + flag, action='store_true')
     parser.add_argument('--model', help='Slug de uno de los modelos disponibles')
     parser.add_argument('--state-file', help='Ruta al JSON de Character Snapshot; reutiliza la ultima ruta valida guardada')
+    interface = parser.add_mutually_exclusive_group()
+    interface.add_argument('--ui', action='store_true', help='Abrir la interfaz OSRS en el navegador')
+    interface.add_argument('--cli', action='store_true', help='Usar el chat de consola')
+    parser.add_argument('--port', type=int, default=8765, help='Puerto local de UI; 0 elige uno libre')
+    parser.add_argument('--install-path', '--install-shortcut', action='store_true', help='Instalar lanzadores en el PATH del usuario')
     args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error('--port debe estar entre 0 y 65535.')
+    if force_ui and args.cli:
+        parser.error('osrs-companion-ui requiere la interfaz grafica; usa osrs-companion --cli.')
+    if args.install_path:
+        from launcher import install_path
+        folder = install_path()
+        print(f'Lanzadores instalados en {folder}')
+        print('Abre una terminal nueva y ejecuta osrs-companion o osrs-companion-ui.')
+        return
     AUTH_DIR.mkdir(exist_ok=True)
     with FileLock(str(AUTH_DIR / 'session.lock'), timeout=0):
         host_id()
@@ -194,17 +231,36 @@ def run():
                 updates['model'] = model
             if updates:
                 save_settings(**updates)
-            chat(model, monitor)
+            if force_ui or args.ui or (default_ui and not args.cli):
+                from web_app import serve
+                serve(monitor, model, port=args.port)
+            else:
+                chat(model, monitor)
+
+
+def _entry(default_ui=True, force_ui=False):
+    try:
+        run(default_ui=default_ui, force_ui=force_ui)
+        return 0
+    except (KeyboardInterrupt, EOFError):
+        print('\nHasta luego.')
+        return 0
+    except Timeout:
+        print('Ya hay una instancia usando esta instalacion.', file=sys.stderr)
+    except CompanionError as exc:
+        print(str(exc), file=sys.stderr)
+    except (requests.RequestException, ValueError, KeyError, OSError):
+        print('Error de red o datos locales. Revisa --state-file y la conexion.', file=sys.stderr)
+    return 1
+
+
+def main():
+    return _entry()
+
+
+def run_ui():
+    return _entry(force_ui=True)
 
 
 if __name__ == '__main__':
-    try:
-        run()
-    except (KeyboardInterrupt, EOFError):
-        print('\nHasta luego.')
-    except Timeout:
-        sys.exit('Ya hay una instancia usando esta instalacion.')
-    except CompanionError as exc:
-        sys.exit(str(exc))
-    except (requests.RequestException, ValueError, KeyError, OSError):
-        sys.exit('Error de red o datos locales. Revisa --state-file y la conexion.')
+    raise SystemExit(main())

@@ -44,6 +44,9 @@ def sse_events(lines):
 
 
 SYSTEM = '''Eres un agente de OSRS. Responde en espanol.
+Se directo, natural y conciso: responde solo lo preguntado, sin listas de datos adicionales no solicitados.
+PROHIBIDO mencionar lastUpdated, sectionUpdated, fechas UTC o timestamps en tu texto,
+salvo que el usuario pregunte explicitamente cuando se actualizo el archivo o que ok sea False.
 Antes de aconsejar sobre el personaje, consulta su estado actual en este turno.
 Usa query_player_stats, query_player_bank y query_quests_and_diaries de forma
 quirurgica segun la pregunta: pide solo la habilidad, objeto, mision o region

@@ -19,7 +19,7 @@ FUNCTION_TOOLS = [
              'include_slayer_and_timers=true agrega Slayer, dailies, farming activo (hasta 25 parches), '
              'birdhouses, toolLeprechaunTotals, prayers, killCounts (KC), activityCounts, minigamePoints, '
              'house (POH), transport y location. Usa true para preguntas sobre runs, KC, casa o transportes; '
-             'false si no los necesitas. Comprueba ok, lastUpdated y sectionUpdated. '
+             'false si no los necesitas. Verifica internamente que ok sea true; no menciones timestamps UTC en tu respuesta al usuario. '
              'Si no hay datos actuales, dilo; no interpretes datos ausentes como cero ni reutilices otros turnos.',
              {'skills': {'type': 'array', 'items': {'type': 'string'}},
               'include_slayer_and_timers': {'type': 'boolean'}}),
@@ -32,7 +32,7 @@ FUNCTION_TOOLS = [
              'y equipo segun source. No devuelve el banco entero. El equipo se devuelve completo si se pide. '
              'source=all o bank incluye ademas hasta 8 ofertas personales de grandExchange, con estado, '
              'cantidades, precio y GP gastados; no son precios actuales del mercado. '
-             'Comprueba ok y timestamps; null significa dato ausente, no cero.',
+             'Verifica internamente que ok sea true; no menciones timestamps UTC en tu respuesta al usuario. null significa dato ausente, no cero.',
              {'search_term': {'type': 'string'},
               'source': {'type': 'string', 'enum': ['all', 'bank', 'inventory', 'equipment']}}),
     function('query_quests_and_diaries',
@@ -45,7 +45,7 @@ FUNCTION_TOOLS = [
              'Combat Achievements muestra resumen de los seis tiers y puntos; para detalles usa un '
              'search_term concreto por tarea, monstruo o tier, con hasta 25 tareas y filtro de completed/incomplete. '
              'Sin termino de busqueda no lista tareas de Combat Achievements. '
-             'Comprueba ok y timestamps; datos ausentes no prueban que un requisito este completado.',
+             'Verifica internamente que ok sea true; no menciones timestamps UTC en tu respuesta al usuario. Datos ausentes no prueban que un requisito este completado.',
              {'search_term': {'type': 'string'},
               'category': {'type': 'string', 'enum': ['all', 'quests', 'diaries', 'combat_achievements']},
               'status_filter': {'type': 'string', 'enum': ['all', 'completed', 'incomplete', 'in_progress']}}),

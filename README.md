@@ -6,7 +6,7 @@
 
 **Tu personaje, tus objetivos y un agente que recuerda cómo te gusta jugar.**
 
-Un asistente de consola para **Old School RuneScape**, construido en Python,
+Un asistente para **Old School RuneScape**, con interfaz local de estilo OSRS y consola, construido en Python,
 con estado exportado por el plugin **Character Snapshot** de RuneLite, memoria local y herramientas que el modelo
 puede consultar durante la conversación.
 
@@ -67,11 +67,29 @@ git clone https://github.com/mauricio-castano-dev/osrs-gpt-companion.git
 Set-Location osrs-gpt-companion
 
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe main.py --init
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\python.exe main.py --install-path
 ```
 
 No hace falta activar el entorno ni configurar `OPENAI_API_KEY`.
+
+### Abre la aplicación desde cualquier carpeta
+
+Tras instalar los lanzadores, **abre una terminal nueva** para que Windows cargue
+el PATH actualizado. Desde cualquier carpeta puedes usar:
+
+```powershell
+osrs-companion
+osrs-companion-ui
+osrs-companion --cli
+```
+
+`osrs-companion` abre la interfaz en el navegador por defecto. `--cli` mantiene
+el chat de consola. También puedes hacer doble clic en `osrs-companion-ui.cmd`
+en la carpeta del proyecto. Los lanzadores usan rutas absolutas al Python de
+`.venv` y a `main.py`; se instalan también en `%LOCALAPPDATA%\OSRSGPTCompanion\bin`.
+El instalador añade esa carpeta al PATH del usuario de forma idempotente, sin
+eliminar sus otras entradas. Si mueves el proyecto, vuelve a ejecutar la instalación.
 
 ### Configura Character Snapshot y conecta tu personaje
 
@@ -84,7 +102,7 @@ Por ejemplo, si eliges `C:\OSRS\Snapshots` y tu personaje se llama
 `ExamplePlayer`, el archivo será `C:\OSRS\Snapshots\ExamplePlayer.json`:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
 
 Sustituye tanto la carpeta como `ExamplePlayer` por los valores de tu exportación.
@@ -99,7 +117,7 @@ La elegibilidad, los modelos y los límites dependen de la cuenta y de los permi
 Para comprobar la instalación con **datos ficticios**, sin iniciar sesión:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --check-state --state-file .\examples\player.example.json
+osrs-companion --check-state --state-file .\examples\player.example.json
 ```
 
 Los datos de `examples/player.example.json` son ficticios y solo sirven para
@@ -113,13 +131,13 @@ Character Snapshot. La última ruta válida que indiques queda guardada para fut
 flowchart LR
     R[Character Snapshot · JSON del personaje] --> W[Monitor watchdog]
     W --> C[Estado en memoria]
-    U[Tu consulta] --> A[Agente · Responses API]
+    U[Tu consulta] --> A[Chat UI o consola · Responses API]
     A --> T[Herramientas locales]
     T --> C
     T <--> M[(SQLite FTS5)]
     T --> E[OSRS Wiki · precios y búsqueda]
     T --> A
-    A --> F[Respuesta en la consola]
+    A --> F[Respuesta y pie sutil de actualidad]
 ```
 
 1. Character Snapshot exporta los datos a la carpeta elegida. El monitor carga el JSON indicado y actualiza la caché cuando detecta cambios, incluidos reemplazos completos.
@@ -199,16 +217,16 @@ monstruo o tier se devuelven hasta **25 tareas**, respetando `status_filter`.
 
 ```powershell
 # Iniciar sesión o reautorizar
-.\.venv\Scripts\python.exe main.py --login
+osrs-companion --login
 
 # Ver los modelos disponibles para tu cuenta
-.\.venv\Scripts\python.exe main.py --models
+osrs-companion --models
 
 # Elegir un modelo y el archivo del personaje
-.\.venv\Scripts\python.exe main.py --model SLUG --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --model SLUG --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 
 # Comprobar el JSON sin consultar al modelo
-.\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
+osrs-companion --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
 
 
@@ -234,7 +252,7 @@ configuración corrupta se ignora y puede reemplazarse con opciones válidas.
 Después de seleccionar la ruta y el modelo, puedes iniciar con:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
+osrs-companion
 ```
 
 ### Visibilidad de herramientas y gancho para interfaz
@@ -246,14 +264,51 @@ después de ejecutar la función. Los errores estructurados notifican `False`;
 un guardado duplicado ya satisfecho sigue siendo exitoso. Los nombres desconocidos
 se muestran como herramienta local y notifican `local`. No se registran argumentos.
 Una llamada repetida con el mismo ID no vuelve a ejecutar ni notificar la función.
-Si el observador falla, se informa y el turno continúa. El callback prepara la
-integración futura; esta versión sigue siendo de consola.
+Si el observador falla, se informa y el turno continúa. La interfaz OSRS utiliza este callback para los chips de herramientas de cada respuesta.
+
+### Interfaz OSRS y tiempo del reporte
+
+El HUD muestra personaje, combate, mundo, Quest Points, GP, habilidades, farming
+y birdhouses. Se actualiza cada **3 segundos** mediante la API local sin consultar
+al modelo. Los cultivos listos aparecen en verde, los que crecen en ámbar y los
+muertos en rojo. La pestaña de memorias permite olvidar un registro con `✕`.
+
+El chat admite texto con formato sencillo, enlaces, bloques de código, chips de
+herramientas, Enter para enviar y Shift + Enter para otra línea. El botón de
+limpiar reinicia el historial y conserva las memorias SQLite. Las respuestas
+deben ser concisas; los timestamps quedan fuera del texto del modelo, salvo que
+los preguntes expresamente o el estado no esté disponible. La consola añade un
+pie tenue `↳ Instantánea: hace 8 s`; la UI usa texto pequeño al 50–55 % de opacidad.
+
+Por defecto se usa `http://127.0.0.1:8765`; si está ocupado se elige un puerto
+libre. Puedes elegirlo con `--port 9000` o usar `--port 0` para asignación automática.
+El servidor acepta exclusivamente conexiones loopback, valida Host y Origin,
+exige un token CSRF de sesión para POST/DELETE y no habilita CORS externo.
+No expongas esta interfaz de escritorio mediante reenvío de puertos.
+
+| Endpoint local | Acción |
+| --- | --- |
+| `GET /api/status` | Estado filtrado en RAM, modelo, ruta y tiempo relativo; sin inferencia. |
+| `GET /api/memories` | Últimas 30 memorias locales. |
+| `POST /api/memories/delete` | Elimina `{ "id": 3 }`, con token CSRF. |
+| `POST /api/chat` | Consulta `{ "message": "..." }`; devuelve respuesta, herramientas y tiempo del reporte. |
+
+El historial del chat se serializa con un lock; una segunda consulta simultánea
+devuelve 409. El historial sigue siendo temporal y se pierde al cerrar el servidor.
+Las APIs y la página usan `Cache-Control: no-store`. Los tokens de OpenAI no se
+entregan al navegador; el token CSRF es independiente y vive solo durante la sesión.
 
 ## 🗂 Estructura
 
 ```text
 osrs-gpt-companion/
 ├── auth.py              # OAuth, PKCE, identidad, DPAPI y renovación
+├── web_app.py           # Loopback API + CSRF
+├── launcher.py          # Windows PATH
+├── pyproject.toml       # Console entry points
+├── ui/                  # HTML / CSS / JS
+├── test_web_app.py      # Local API tests
+├── test_app_shell.py    # Freshness + launchers
 ├── main.py              # Consola y ciclo de vida del monitor
 ├── inference.py         # Responses API, SSE y ciclo de herramientas
 ├── state_monitor.py     # Caché del JSON y eventos del sistema de archivos
@@ -313,7 +368,7 @@ de finalización; las llamadas de herramientas incompletas no se ejecutan.
 
 ## 📌 Alcance actual
 
-- Interfaz de consola para Windows y un perfil ChatGPT por instalación.
+- Interfaz local OSRS y consola para Windows; un perfil ChatGPT por instalación.
 - El archivo debe ser un objeto JSON de hasta **1 MiB**.
 - Las herramientas exponen resultados filtrados; `snapshot()` se conserva para comprobaciones locales y no se expone al modelo. Los resultados necesarios sí se reenvían dentro del turno con `store: false`.
 - Los cambios de preferencias se guardan como nuevos registros fechados.
