@@ -30,15 +30,19 @@ Discuss your progress and keep your preferences across sessions:
 > “Check my skills and quests. Which goal should I tackle next?”
 >
 > “What did I save about Dragon Slayer?”
+>
+> “Check the price of Abyssal whip and verify Dragon Slayer II requirements on the wiki.”
 
-- **Updated state in memory:** watches the JSON exported by **Character Snapshot** with `watchdog`.
-- **Persistent memory:** saves and retrieves goals and preferences using SQLite FTS5.
-- **Tool calling:** the model can check data, recall memories, and save preferences before answering.
+- **Updated, filtered state:** watches the **Character Snapshot** JSON with `watchdog` and queries only the needed data.
+- **Persistent memory:** stores goals and preferences in SQLite FTS5 with flexible token search.
+- **Seven tools:** granular character queries, Grand Exchange prices, OSRS Wiki, and persistent memory.
 - **Sign in with ChatGPT:** local OAuth authentication with PKCE, token refresh, and encrypted storage using Windows DPAPI.
 - **Responses API:** HTTP/SSE transport with `store: false` and `stream: true`.
 
 **The application runs on your PC; inference runs at OpenAI.** State and memories
-retrieved by the model are sent as context for those requests.
+retrieved by the model are sent as context for those requests. Character tools
+send filtered results, never the full JSON. Wiki queries and item names are sent
+to the public OSRS Wiki APIs.
 
 This translates the documentation. The console commands, interface messages,
 and the agent's current default language remain Spanish.
@@ -110,6 +114,7 @@ flowchart LR
     A --> T[Local tools]
     T --> C
     T <--> M[(SQLite FTS5)]
+    T --> E[OSRS Wiki · prices and search]
     T --> A
     A --> F[Console response]
 ```
@@ -117,7 +122,7 @@ flowchart LR
 1. Character Snapshot exports data to your chosen folder. The monitor loads the selected JSON and updates the cache when it detects changes, including full file replacements.
 2. Your message is sent to the model with instructions and tool schemas.
 3. The model can request one or more functions. Python validates arguments and executes only the allowed functions.
-4. Results return through `function_call_output`, linked to the original `call_id`.
+4. Filtered results, memories, or external data return through `function_call_output`, linked to the original `call_id`. The full character JSON is never sent to the model.
 5. The loop continues until a final answer, with limits of **8 rounds** and **24 calls** per turn.
 
 File changes update the cache; model requests happen during your chat turns.
@@ -130,13 +135,29 @@ Functions are grouped in the `osrs` namespace with strict JSON schemas.
 
 | Tool | Purpose |
 | --- | --- |
-| `get_live_state` | Check the character snapshot before advising on progress. |
-| `save_user_preference` | Save goals, preferences, and restrictions expressed by the user. |
-| `recall_user_preference` | Retrieve memories using specific words or phrases. |
+| `query_player_stats` | Selected skills, basic identity, and vitals; optional Slayer, daily activity, and timer summaries. |
+| `query_player_bank` | Search bank/inventory by name or ID; inspect equipment and Coins/Platinum token liquidity. |
+| `query_quests_and_diaries` | Quests and diaries filtered by name, category, and status, with overall counts. |
+| `check_ge_price` | Fetch observed Grand Exchange prices and the time of each observation. |
+| `search_osrs_wiki` | Find OSRS Wiki pages and retrieve a verifiable introduction with its link. |
+| `save_agent_memory` | Save goals, preferences, and plans expressed by the user. |
+| `recall_agent_memory` | Retrieve memories by keywords, using AND first and OR as a fallback. |
 
-Search uses **FTS5 literal token phrases**: keep specific item or quest names,
-try shorter queries when necessary, and retrieve up to eight results.
-This is neither semantic search nor an internet query.
+Memory search uses **safe Unicode tokens**. It first requires every term
+(`AND`); if there are no results, it searches for any term (`OR`). Words do not
+need to be adjacent. Up to eight memories are ranked by relevance and date;
+the agent must check partial matches before using them.
+
+Character queries use the RAM cache. Results include `ok`, update timestamps,
+and limits: up to **30 bank items**, **40 quests**, and **30 tasks per region**.
+An empty search does not list the bank. Diaries without a search show tier status
+only. Missing values are distinguished from a known zero.
+
+Prices come from the OSRS Wiki API, with up to five matches and their timestamps.
+The item catalog is cached in RAM for **six hours**. Wiki search returns up to
+three links and a plain-text introduction from the first page, within an overall
+budget of approximately **2.5 KB**. Introductions may omit requirements or drop
+tables. Calls use a descriptive `User-Agent` and a session without OpenAI credentials.
 
 ## ⌨️ Commands
 
@@ -170,9 +191,12 @@ osrs-gpt-companion/
 ├── inference.py         # Responses API, SSE, and tool loop
 ├── state_monitor.py     # JSON cache and file events
 ├── memory_db.py         # Persistent SQLite FTS5 memory
-├── tools.py             # Schemas and allowed function dispatch
+├── tools.py             # Schemas and dispatch for seven tools
+├── wiki_client.py       # Prices, search, and item catalog cache
 ├── osrs_reader.py       # Previous reader retained for compatibility
 ├── test_agent.py        # Agent and monitor tests
+├── test_queries.py      # Filters, limits, routing, and FTS5 search
+├── test_wiki_client.py  # Mocked APIs, cache, and User-Agent
 ├── test_companion.py    # Authentication and compatibility tests
 ├── examples/
 │   └── player.example.json
@@ -190,6 +214,7 @@ osrs-gpt-companion/
 | `.auth/host.json` | Persistent installation identifier. |
 | `.auth/profile.dpapi` | Credentials encrypted for the current Windows user. |
 | `memories.sqlite3` | Persistent goals and preferences; **not encrypted**. |
+| Item catalog cache | OSRS Wiki mapping in RAM, expiring after six hours. |
 | `<character_name>.json` | Character Snapshot data in the folder you selected. |
 
 Git excludes credentials, local databases, character files, Python environments,
@@ -208,32 +233,35 @@ or that tool results remain exclusively on your PC.
 
 Tests use temporary files, fictional tokens, and simulated responses. They do
 not require a ChatGPT session or consume your plan. They check the monitor,
-SQLite FTS5, authentication, tool arguments, execution limits, and SSE.
+SQLite FTS5 token search, filters and output limits, authentication, tool arguments,
+execution limits, and SSE. External APIs are mocked to verify `User-Agent`, caching,
+timestamps, extracts, and error handling without network access.
 DPAPI tests require access to the Windows user's encryption profile.
 
 The client accepts connections that omit `Content-Type` if the body contains
 valid SSE events. It rejects malformed events and responses without completion
 confirmation; incomplete tool calls are not executed.
 
-## 📌 Scope of this first iteration
+## 📌 Current scope
 
 - Windows console interface and one ChatGPT profile per installation.
 - The file must contain a JSON object of up to **1 MiB**.
-- `get_live_state` currently returns the full snapshot: a large bank increases context and usage as it is sent again during the turn.
+- Tools expose filtered results. `snapshot()` remains available for local checks and is not exposed to the model. Required results are still sent again within a turn with `store: false`.
 - Preference changes are stored as new dated records.
 - Failed requests are not automatically retried; memories already saved remain stored.
 - Descriptions tell the model when to check state; they do not guarantee it will do so in every answer.
-- Web queries, OSRS Wiki, current prices, and game control are not yet included.
+- External queries are limited to OSRS Wiki and its price API; general web browsing and game control are not included.
+- API failures return explicit tool errors; the agent must acknowledge that the information could not be verified.
 
 ## 🗺 Roadmap
 
-- [ ] Granular skill, item, and quest queries to reduce context.
-- [ ] OSRS Wiki and Grand Exchange price queries.
+- [x] Granular skill, item, and quest queries to reduce context.
+- [x] OSRS Wiki and Grand Exchange price queries.
 - [ ] Character selection and persistent path configuration.
 - [ ] Memory management: list, update, and delete preferences.
 - [ ] Better visibility into usage and RuneLite update status.
 
-These are planned improvements, not included features.
+Checked items are implemented; unchecked items are planned improvements.
 
 ## 🤝 Development and documentation
 
@@ -253,6 +281,7 @@ Share only fictional examples or data you intend to make public.
 - [Responses API: function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [watchdog](https://python-watchdog.readthedocs.io/en/stable/quickstart.html)
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
+- [OSRS Wiki: Real-time Prices](https://oldschool.runescape.wiki/w/RuneScape:Real-time_Prices)
 
 ---
 

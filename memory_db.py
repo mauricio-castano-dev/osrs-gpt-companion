@@ -1,4 +1,5 @@
-"""Memoria local FTS5: busquedas por frase literal, sin SQL del modelo."""
+"""Memoria local FTS5 por tokens: AND primero, OR como alternativa."""
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -44,12 +45,14 @@ def save_memory(tema, contenido):
 
 def search_memory(query):
     query = _text(query, 300)
-    # Las comillas impiden interpretar OR, *, columnas o SQL como operadores.
-    phrase = '"' + query.replace('"', '""') + '"'
+    tokens = re.findall(r'\w+', query, flags=re.UNICODE)
+    if not tokens:
+        return []
+    quoted = ['"' + token.replace('"', '""') + '"' for token in tokens]
     with closing(_connect()) as connection:
-        rows = connection.execute(
-            '''SELECT rowid AS id, tema, contenido, created_at FROM memories
-               WHERE memories MATCH ? ORDER BY bm25(memories), rowid DESC LIMIT 8''',
-            (phrase,),
-        ).fetchall()
+        sql = '''SELECT rowid AS id, tema, contenido, created_at FROM memories
+                 WHERE memories MATCH ? ORDER BY bm25(memories), rowid DESC LIMIT 8'''
+        rows = connection.execute(sql, (' AND '.join(quoted),)).fetchall()
+        if not rows and len(quoted) > 1:
+            rows = connection.execute(sql, (' OR '.join(quoted),)).fetchall()
         return [dict(row) for row in rows]

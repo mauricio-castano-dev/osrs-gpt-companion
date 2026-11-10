@@ -30,15 +30,19 @@ Conversa sobre tu progreso y conserva tus preferencias entre sesiones:
 > «Revisa mis habilidades y misiones. ¿Qué objetivo debería completar después?»
 >
 > «¿Qué había guardado sobre Dragon Slayer?»
+>
+> «Consulta el precio de Abyssal whip y verifica los requisitos de Dragon Slayer II en la wiki.»
 
-- **Estado actualizado en memoria:** observa el JSON exportado por **Character Snapshot** con `watchdog`.
-- **Memoria persistente:** guarda y recupera metas o gustos mediante SQLite FTS5.
-- **Invocación de herramientas:** el modelo puede consultar datos, revisar recuerdos y guardar preferencias antes de responder.
+- **Estado actualizado y filtrado:** observa el JSON de **Character Snapshot** con `watchdog` y consulta solo los datos necesarios.
+- **Memoria persistente:** guarda metas y preferencias en SQLite FTS5, con búsqueda flexible por tokens.
+- **Siete herramientas:** consultas granulares del personaje, precios del Grand Exchange, OSRS Wiki y memoria persistente.
 - **Sign in with ChatGPT:** autenticación OAuth local con PKCE, renovación de tokens y almacenamiento cifrado mediante Windows DPAPI.
 - **Responses API:** transporte HTTP/SSE, con `store: false` y `stream: true`.
 
 **La aplicación se ejecuta en tu PC; la inferencia se realiza en OpenAI.** El estado
 y las memorias que consulta el modelo se envían como contexto de esas solicitudes.
+Las herramientas del personaje envían resultados filtrados, nunca el JSON completo.
+Las búsquedas de wiki y nombres de objetos se envían a las APIs públicas de OSRS Wiki.
 
 La documentación está disponible en español, inglés y portugués de Brasil.
 Los comandos, los mensajes de consola y el idioma predeterminado actual del
@@ -113,6 +117,7 @@ flowchart LR
     A --> T[Herramientas locales]
     T --> C
     T <--> M[(SQLite FTS5)]
+    T --> E[OSRS Wiki · precios y búsqueda]
     T --> A
     A --> F[Respuesta en la consola]
 ```
@@ -120,7 +125,7 @@ flowchart LR
 1. Character Snapshot exporta los datos a la carpeta elegida. El monitor carga el JSON indicado y actualiza la caché cuando detecta cambios, incluidos reemplazos completos.
 2. Tu mensaje se envía al modelo junto con las instrucciones y los esquemas de herramientas.
 3. El modelo puede solicitar una o varias funciones. Python valida los argumentos y ejecuta únicamente las funciones permitidas.
-4. Los resultados vuelven al modelo mediante `function_call_output`, asociado al `call_id` original.
+4. Los resultados filtrados, recuerdos o datos externos vuelven al modelo mediante `function_call_output`, asociado al `call_id` original. El JSON completo del personaje no se envía al modelo.
 5. El ciclo continúa hasta una respuesta final, con límites de **8 rondas** y **24 llamadas** por turno.
 
 Los cambios del archivo actualizan la caché; las consultas al modelo se realizan
@@ -133,13 +138,31 @@ Las funciones se agrupan en el namespace `osrs`, con esquemas JSON estrictos.
 
 | Herramienta | Propósito |
 | --- | --- |
-| `get_live_state` | Consultar la instantánea del personaje antes de aconsejar sobre su progreso. |
-| `save_user_preference` | Guardar metas, gustos y restricciones expresados por el usuario. |
-| `recall_user_preference` | Recuperar recuerdos por palabras o frases concretas. |
+| `query_player_stats` | Habilidades seleccionadas, identidad básica y vitales; resúmenes opcionales de Slayer, dailies y timers. |
+| `query_player_bank` | Buscar por nombre o ID en banco/inventario; consultar equipo y liquidez en Coins y Platinum tokens. |
+| `query_quests_and_diaries` | Misiones y diarios filtrados por nombre, categoría y estado, con conteos globales. |
+| `check_ge_price` | Consultar precios observados del Grand Exchange y la fecha de cada observación. |
+| `search_osrs_wiki` | Buscar páginas de OSRS Wiki y consultar una introducción verificable con su enlace. |
+| `save_agent_memory` | Guardar metas, preferencias y planes expresados por el usuario. |
+| `recall_agent_memory` | Recuperar recuerdos mediante palabras clave, primero con AND y después con OR. |
 
-La búsqueda usa **FTS5 por frase literal de tokens**: conserva nombres concretos
-de objetos o misiones, admite consultas más cortas y devuelve hasta ocho resultados.
-No es una búsqueda semántica ni una consulta a internet.
+La búsqueda de memoria usa **tokens Unicode seguros**. Primero exige todos
+los términos (`AND`); si no hay resultados, busca cualquiera (`OR`). Las palabras
+no necesitan estar juntas. Devuelve hasta ocho recuerdos ordenados por relevancia
+y fecha: el agente debe revisar las coincidencias parciales.
+
+Las consultas de personaje trabajan sobre la caché en RAM. Los resultados incluyen
+`ok`, marcas de actualización y límites: hasta **30 objetos del banco**, **40
+misiones** y **30 tareas por región**. Una búsqueda vacía no enumera el banco;
+los diarios sin búsqueda solo muestran el estado de sus tiers. Los campos ausentes
+se distinguen de un valor conocido de cero.
+
+Los precios provienen de la API de OSRS Wiki, con hasta cinco coincidencias y
+sus timestamps; el catálogo de objetos se guarda en RAM durante **seis horas**.
+La búsqueda de wiki devuelve hasta tres enlaces y la introducción de la primera
+página en texto plano, con un presupuesto total aproximado de **2.5 KB**. La
+introducción puede no incluir todos los requisitos o tablas de drops. Las llamadas
+usan un `User-Agent` descriptivo y una sesión sin credenciales de OpenAI.
 
 ## ⌨️ Comandos
 
@@ -173,9 +196,12 @@ osrs-gpt-companion/
 ├── inference.py         # Responses API, SSE y ciclo de herramientas
 ├── state_monitor.py     # Caché del JSON y eventos del sistema de archivos
 ├── memory_db.py         # Memoria persistente SQLite FTS5
-├── tools.py             # Esquemas y ejecución de funciones permitidas
+├── tools.py             # Esquemas y ejecución de las siete herramientas
+├── wiki_client.py       # Precios, búsqueda y caché del catálogo
 ├── osrs_reader.py       # Lector anterior conservado por compatibilidad
 ├── test_agent.py        # Pruebas del agente y del monitor
+├── test_queries.py      # Filtros, límites, rutas y búsqueda FTS5
+├── test_wiki_client.py  # APIs simuladas, caché y User-Agent
 ├── test_companion.py    # Pruebas de autenticación y compatibilidad
 ├── examples/
 │   └── player.example.json
@@ -193,6 +219,7 @@ osrs-gpt-companion/
 | `.auth/host.json` | Identificador persistente de la instalación. |
 | `.auth/profile.dpapi` | Credenciales cifradas para el usuario actual de Windows. |
 | `memories.sqlite3` | Metas y preferencias persistentes; **sin cifrado**. |
+| Caché del catálogo | Mapping de objetos de OSRS Wiki en RAM; caduca a las seis horas. |
 | `<nombre_del_personaje>.json` | Datos exportados por Character Snapshot en la carpeta que seleccionaste. |
 
 Git excluye credenciales, bases de datos locales, archivos de personajes,
@@ -212,33 +239,35 @@ sin conexión ni que los resultados de herramientas permanezcan únicamente en t
 
 Las pruebas utilizan archivos temporales, tokens ficticios y respuestas simuladas;
 no necesitan una sesión de ChatGPT ni consumen el plan. Verifican el monitor,
-SQLite FTS5, autenticación, argumentos de herramientas, límites de ejecución y SSE.
+SQLite FTS5 por tokens, filtros y límites de resultados, autenticación, argumentos
+de herramientas y SSE. Las APIs externas se simulan para comprobar `User-Agent`,
+caché, timestamps, extractos y manejo de errores sin acceder a la red.
 Las pruebas de DPAPI requieren acceso al perfil de cifrado del usuario de Windows.
 
 El cliente admite conexiones que omiten `Content-Type` si el cuerpo contiene
 eventos SSE válidos. Rechaza eventos malformados y respuestas sin confirmación
 de finalización; las llamadas de herramientas incompletas no se ejecutan.
 
-## 📌 Alcance de esta primera iteración
+## 📌 Alcance actual
 
 - Interfaz de consola para Windows y un perfil ChatGPT por instalación.
 - El archivo debe ser un objeto JSON de hasta **1 MiB**.
-- `get_live_state` devuelve actualmente la instantánea completa: un banco grande
-  incrementa el contexto y el consumo al reenviarse durante el turno.
+- Las herramientas exponen resultados filtrados; `snapshot()` se conserva para comprobaciones locales y no se expone al modelo. Los resultados necesarios sí se reenvían dentro del turno con `store: false`.
 - Los cambios de preferencias se guardan como nuevos registros fechados.
 - Si una consulta falla, las memorias ya guardadas se conservan y no se reintenta automáticamente.
 - Las descripciones indican al modelo cuándo consultar el estado; no constituyen una garantía de que lo haga en toda respuesta.
-- Todavía no incluye consultas web, OSRS Wiki, precios actuales ni control del juego.
+- Las consultas externas se limitan a OSRS Wiki y su API de precios; no hay navegación web general ni control del juego.
+- Si una API falla, el agente recibe un error explícito y debe reconocer que no pudo verificar el dato.
 
 ## 🗺 Próximos pasos
 
-- [ ] Consultas granulares de habilidades, objetos y misiones para reducir contexto.
-- [ ] Integración de consulta con OSRS Wiki y precios del Grand Exchange.
+- [x] Consultas granulares de habilidades, objetos y misiones para reducir contexto.
+- [x] Integración de consulta con OSRS Wiki y precios del Grand Exchange.
 - [ ] Selección de personaje y configuración persistente de rutas.
 - [ ] Gestión de memorias: listar, actualizar y eliminar preferencias.
 - [ ] Mejor visibilidad del uso y del estado de actualización de RuneLite.
 
-Estas tareas son planes de evolución y no funcionalidades incluidas.
+Las tareas marcadas están implementadas; las pendientes son planes de evolución.
 
 ## 🤝 Desarrollo y documentación
 
@@ -258,6 +287,7 @@ de Python. Comparte únicamente ejemplos ficticios o datos que quieras hacer pú
 - [Responses API: function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [watchdog](https://python-watchdog.readthedocs.io/en/stable/quickstart.html)
 - [SQLite FTS5](https://www.sqlite.org/fts5.html)
+- [OSRS Wiki: Real-time Prices](https://oldschool.runescape.wiki/w/RuneScape:Real-time_Prices)
 
 ---
 

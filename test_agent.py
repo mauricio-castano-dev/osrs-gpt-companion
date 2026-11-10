@@ -50,27 +50,27 @@ class AgentTests(unittest.TestCase):
             saved = memory_db.save_memory('Dragon Slayer II', 'Quiero terminar Dragon Slayer II sin guias.')
             self.assertTrue(saved['saved'])
             self.assertEqual(len(memory_db.search_memory('Dragon Slayer')), 1)
-            self.assertEqual(memory_db.search_memory('Dragon OR Slayer'), [])
+            self.assertEqual(len(memory_db.search_memory('Dragon OR Slayer')), 1)
             self.assertEqual(memory_db.search_memory('" OR 1=1 --'), [])
             self.assertTrue(memory_db.save_memory('Dragon Slayer II', 'Quiero terminar Dragon Slayer II sin guias.')['duplicate'])
             self.assertEqual(memory_db.search_memory('Dragon Slayer')[0]['id'], saved['id'])
 
     def test_router_rejects_unknown_tools_and_invalid_arguments(self):
         monitor = Mock()
-        monitor.snapshot.return_value = {'ok': True, 'data': {'bank': {}}}
+        monitor.query_stats.return_value = {'ok': True, 'data': {'bank': {}}}
         router = ToolRouter(monitor)
-        self.assertTrue(router.execute({'name': 'get_live_state', 'arguments': '{}', 'namespace': 'osrs'})['ok'])
+        self.assertTrue(router.execute({'name': 'query_player_stats', 'arguments': json.dumps({'skills': [], 'include_slayer_and_timers': False}), 'namespace': 'osrs'})['ok'])
         for call in [
             {'name': 'shell', 'arguments': '{}'},
-            {'name': 'get_live_state', 'arguments': '{'},
-            {'name': 'get_live_state', 'arguments': '{"path":"secret"}'},
-            {'name': 'save_user_preference', 'arguments': '{"tema":2,"contenido":"x"}'},
-            {'name': 'get_live_state', 'arguments': '{}', 'namespace': 'other'},
+            {'name': 'query_player_stats', 'arguments': '{'},
+            {'name': 'query_player_stats', 'arguments': '{"path":"secret"}'},
+            {'name': 'save_agent_memory', 'arguments': '{"tema":2,"contenido":"x"}'},
+            {'name': 'query_player_stats', 'arguments': '{}', 'namespace': 'other'},
         ]:
             self.assertFalse(router.execute(call)['ok'])
 
     def test_agent_round_trip_preserves_reasoning_and_tool_call_id(self):
-        call = {'type': 'function_call', 'call_id': 'c1', 'name': 'get_live_state', 'namespace': 'osrs', 'arguments': '{}'}
+        call = {'type': 'function_call', 'call_id': 'c1', 'name': 'query_player_stats', 'namespace': 'osrs', 'arguments': '{}'}
         reasoning = {'type': 'reasoning', 'id': 'r1', 'summary': [], 'encrypted_content': 'opaque'}
         final = [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Plan listo'}]}]
         router = Mock()
@@ -88,7 +88,7 @@ class AgentTests(unittest.TestCase):
         router.execute.assert_called_once_with(call)
 
     def test_repeated_call_is_not_executed_twice_and_loop_is_bounded(self):
-        call = {'type': 'function_call', 'call_id': 'same', 'name': 'save_user_preference', 'arguments': '{}'}
+        call = {'type': 'function_call', 'call_id': 'same', 'name': 'save_agent_memory', 'arguments': '{}'}
         router = Mock()
         router.execute.return_value = {'saved': True}
         with patch.object(inference, 'response_round', return_value=[call]) as respond, contextlib.redirect_stdout(io.StringIO()):

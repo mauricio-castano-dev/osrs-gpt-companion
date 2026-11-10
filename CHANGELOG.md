@@ -1,5 +1,31 @@
 # Historial de cambios
 
+## 0.2.0 — 2026-11-09
+
+### Añadido
+
+- Siete herramientas en el namespace `osrs`: estadísticas, objetos, misiones/diarios, precios, wiki y dos funciones de memoria.
+- Consultas granulares sobre la caché RAM con metadatos de actualización y errores sin datos antiguos.
+- Banco limitado a 30 coincidencias, misiones a 40 y tareas de diarios a 30 por región.
+- Resumen de liquidez en Coins y Platinum tokens, inventario y equipo.
+- Precios mediante la API de OSRS Wiki, con hasta cinco coincidencias y mapping en RAM durante seis horas.
+- Búsqueda de OSRS Wiki con tres enlaces e introducción en texto plano, acotada a unos 2.5 KB.
+- Cliente HTTP público separado de la sesión de OpenAI y con User-Agent descriptivo.
+- Pruebas de filtros sobre bancos grandes, las siete rutas, esquemas, caché, APIs y errores.
+
+### Cambiado
+
+- Eliminada la herramienta que enviaba el JSON completo al modelo; `snapshot()` se conserva solo para uso local.
+- FTS5 tokeniza las consultas Unicode, busca con AND y usa OR si no hay resultados; mantiene deduplicación y límite de ocho memorias.
+- El agente consulta precios antes de estimarlos y verifica mecánicas/requisitos en la wiki cuando necesita información externa.
+- README en español, inglés y portugués de Brasil sincronizados con las nuevas capacidades.
+
+### Conservado
+
+- `auth.py` sin modificaciones.
+- Lógica de `sse_events`, `response_round` y `answer` intacta, incluidos límites de rondas y llamadas.
+
+
 ## Documentación — 2026-11-09
 
 - Añadidas traducciones completas al inglés y portugués de Brasil, con navegación entre idiomas.
