@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "lastUpdated": "2026-11-09T00:00:00Z",
+  "sectionUpdated": {},
+  "player": {
+    "username": "ExamplePlayer",
+    "combatLevel": 50,
+    "accountType": "NORMAL",
+    "members": true
+  },
+  "skills": {
+    "ATTACK": {"level": 40, "xp": 37224, "boostedLevel": 40},
+    "STRENGTH": {"level": 40, "xp": 37224, "boostedLevel": 40}
+  },
+  "bank": {"totalItems": 1, "items": [{"itemId": 995, "name": "Coins", "quantity": 10000}]},
+  "inventory": [],
+  "equipment": {},
+  "questPoints": 1,
+  "quests": [{"name": "COOKS_ASSISTANT", "displayName": "Cook's Assistant", "state": "FINISHED"}]
+}

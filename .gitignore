@@ -1,0 +1,39 @@
+# Credenciales y configuracion local
+.auth/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Estado privado del jugador (los ejemplos se autorizan explicitamente)
+/*.json
+!/*.example.json
+
+# Memoria local y ficheros auxiliares de SQLite
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Archivos locales de trabajo y exportaciones duplicadas
+backups/
+PROMPT.md
+CODIGO_COMPLETO.md
+*.log
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
