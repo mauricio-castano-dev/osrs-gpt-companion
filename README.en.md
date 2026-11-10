@@ -101,8 +101,9 @@ To check the installation with **fictional data**, without signing in:
 ```
 
 `examples/player.example.json` contains fictional data for checking installation.
-To use your real state, always pass `--state-file` pointing to
-`<character_name>.json` in the folder you selected in Character Snapshot.
+To use your real state for the first time, pass `--state-file` pointing to
+`<character_name>.json` in the folder you selected in Character Snapshot. The last
+valid path you explicitly select is saved for future launches.
 
 ## 🧭 How it works
 
@@ -185,6 +186,9 @@ task, monster, or tier returns up to **25 tasks**, respecting `status_filter`.
 | Command | Action |
 | --- | --- |
 | `/salir` | Close the console while keeping the authentication session. |
+| `/estado` | Show a local character, update, GP, and active patch summary without calling the model. |
+| `/memorias` | List the latest 20 memories with IDs and dates without calling the model. |
+| `/olvidar ID` | Delete a local memory by ID and report whether it existed; no model call. |
 | `/limpiar` | Clear the in-memory chat history; keep SQLite memories. |
 | `/uso` | Open ChatGPT usage controls. |
 | `/logout` | Attempt to revoke the session and remove local tokens. |
@@ -202,6 +206,42 @@ task, monster, or tier returns up to **25 tasks**, respecting `status_filter`.
 # Validate the JSON without calling the model
 .\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
+
+
+### Local commands and startup preferences
+
+`/estado` displays five lines with `ok`, `lastUpdated`, character name, combat
+level, world, bank/inventory GP equivalents, and active farming patch count.
+Unavailable state is reported without presenting old values as current.
+`/memorias` shows `[#id] (created_at) tema: contenido`; `/olvidar 3` deletes
+memory ID 3 or reports that it does not exist. These commands do not generate
+inference requests or enter the history sent to the model. Model discovery and
+authentication may still access the network when the application starts.
+
+Explicit `--state-file` and `--model` options override values saved in
+`.auth/settings.json`. A path is saved only after its JSON loads successfully;
+`--check-state --state-file ...` also saves it without contacting OpenAI. Models
+are saved after validation against the catalog. If a saved path no longer
+exists, the legacy default path is used. If the saved model is unavailable,
+the first catalog model is selected. Fallbacks do not overwrite your saved
+choices. Corrupted settings are ignored and can be replaced with valid options.
+
+After choosing the path and model, you can launch with:
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+### Tool visibility and the interface hook
+
+The console shows `[Consultando herramienta: query_player_stats]` with a validated
+name for each new call. `answer(question, model, history, router,
+on_tool_call=None)` accepts an optional observer receiving `(tool_name, ok_status)`
+after execution. Structured errors report `False`; an already satisfied duplicate
+save remains successful. Unknown names use the local tool label and report
+`local`. Arguments are not logged. Repeated calls with the same ID are neither
+executed nor reported twice. Observer errors are reported without interrupting
+the turn. This hook supports a future interface; this version remains a console app.
 
 ## 🗂 Project structure
 
@@ -234,6 +274,7 @@ osrs-gpt-companion/
 | --- | --- |
 | `.auth/host.json` | Persistent installation identifier. |
 | `.auth/profile.dpapi` | Credentials encrypted for the current Windows user. |
+| `.auth/settings.json` | Last valid state path and model explicitly selected through CLI; written atomically. |
 | `memories.sqlite3` | Persistent goals and preferences; **not encrypted**. |
 | Item catalog cache | OSRS Wiki mapping in RAM, expiring after six hours. |
 | `<character_name>.json` | Character Snapshot data in the folder you selected. |
@@ -278,9 +319,11 @@ confirmation; incomplete tool calls are not executed.
 
 - [x] Granular skill, item, and quest queries to reduce context.
 - [x] OSRS Wiki and Grand Exchange price queries.
-- [ ] Character selection and persistent path configuration.
-- [ ] Memory management: list, update, and delete preferences.
-- [ ] Better visibility into usage and RuneLite update status.
+- [x] Character file selection through CLI and persistent path/model preferences.
+- [x] Local memory listing and deletion by ID.
+- [ ] Direct editing of existing memories.
+- [x] Executed tool names, a UI callback, and a local state command.
+- [ ] Detailed usage metrics per request.
 
 Checked items are implemented; unchecked items are planned improvements.
 

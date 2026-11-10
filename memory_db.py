@@ -56,3 +56,23 @@ def search_memory(query):
         if not rows and len(quoted) > 1:
             rows = connection.execute(sql, (' OR '.join(quoted),)).fetchall()
         return [dict(row) for row in rows]
+
+
+def list_memories(limit=20):
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError('limit debe ser un entero entre 1 y 100.')
+    with closing(_connect()) as connection:
+        rows = connection.execute(
+            'SELECT rowid AS id, tema, contenido, created_at FROM memories ORDER BY rowid DESC LIMIT ?',
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def delete_memory(memory_id):
+    if not isinstance(memory_id, int) or isinstance(memory_id, bool) or memory_id <= 0:
+        raise ValueError('memory_id debe ser un entero mayor que cero.')
+    with closing(_connect()) as connection, connection:
+        connection.execute('BEGIN IMMEDIATE')
+        cursor = connection.execute('DELETE FROM memories WHERE rowid = ?', (memory_id,))
+        return {'deleted': cursor.rowcount > 0, 'id': memory_id}

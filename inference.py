@@ -99,7 +99,7 @@ def response_round(model, items):
     raise CompanionError('Stream interrumpido; no se ejecutaron herramientas de esta respuesta.')
 
 
-def answer(question, model, history, router):
+def answer(question, model, history, router, on_tool_call=None):
     items = [{'role': 'system', 'content': SYSTEM}, *history,
              {'role': 'user', 'content': question}]
     executed = {}
@@ -129,8 +129,22 @@ def answer(question, model, history, router):
                 if old_signature != signature:
                     raise CompanionError('Se repitio un call_id con argumentos distintos.')
             else:
-                print('[Consultando herramienta local]', flush=True)
-                result = json.dumps(router.execute(call), ensure_ascii=False, allow_nan=False)
+                known_tools = {tool['name'] for namespace in TOOLS for tool in namespace.get('tools', [])}
+                name = call.get('name')
+                name = name.removeprefix('osrs.') if isinstance(name, str) else None
+                tool_name = name if name in known_tools else 'local'
+                label = f'[Consultando herramienta: {tool_name}]' if name in known_tools else '[Consultando herramienta local]'
+                print(label, flush=True)
+                tool_result = router.execute(call)
+                if callable(on_tool_call):
+                    ok_status = not isinstance(tool_result, dict) or (
+                        tool_result.get('ok', True) is not False and 'error' not in tool_result)
+                    try:
+                        on_tool_call(tool_name, ok_status)
+                    except Exception:
+                        # Un observador defectuoso no debe invalidar una memoria ya guardada.
+                        print('[No se pudo notificar al observador de herramientas]', flush=True)
+                result = json.dumps(tool_result, ensure_ascii=False, allow_nan=False)
                 executed[call_id] = (signature, result)
             items.append({'type': 'function_call_output', 'call_id': call_id, 'output': result})
     raise CompanionError('Limite de 8 rondas alcanzado; las memorias ya guardadas se conservan.')

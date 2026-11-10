@@ -292,6 +292,26 @@ class RealSchemaTests(unittest.TestCase):
 
 
 class MemoryTokenTests(unittest.TestCase):
+    def test_list_delete_order_limits_validation_and_missing_ids(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(memory_db, 'DB_PATH', Path(folder) / 'memory.db'):
+            self.assertEqual(memory_db.list_memories(), [])
+            first = memory_db.save_memory('First', 'First preference')['id']
+            second = memory_db.save_memory('Second', 'Second preference')['id']
+            self.assertEqual([r['id'] for r in memory_db.list_memories()], [second, first])
+            self.assertEqual(len(memory_db.list_memories(1)), 1)
+            self.assertEqual(set(memory_db.list_memories()[0]), {'id', 'tema', 'contenido', 'created_at'})
+            self.assertEqual(memory_db.delete_memory(first), {'deleted': True, 'id': first})
+            self.assertEqual(memory_db.search_memory('First'), [])
+            self.assertEqual(memory_db.delete_memory(first), {'deleted': False, 'id': first})
+            self.assertEqual(memory_db.delete_memory(999), {'deleted': False, 'id': 999})
+            self.assertEqual(len(memory_db.list_memories()), 1)
+            for value in (True, False, '2', None, 0, -1, 101, 1.5):
+                with self.assertRaises(ValueError):
+                    memory_db.list_memories(value)
+            for value in (True, False, '2', None, 0, -1, 1.5):
+                with self.assertRaises(ValueError):
+                    memory_db.delete_memory(value)
+
     def test_and_precedence_or_fallback_unicode_and_safe_operators(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(memory_db, 'DB_PATH', Path(folder) / 'memory.db'):
             a = memory_db.save_memory('Dragon planning', 'Quiero completar Slayer despues de entrenar.')

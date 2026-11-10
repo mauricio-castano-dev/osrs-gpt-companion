@@ -1,5 +1,23 @@
 # Historial de cambios
 
+## 0.3.0 — 2026-11-09
+
+### Añadido
+
+- `list_memories(limit=20)` y `delete_memory(memory_id)` con validación estricta de enteros y SQL parametrizado.
+- Comandos locales `/estado`, `/memorias` y `/olvidar ID`, sin inferencias ni entradas en el historial del modelo.
+- Persistencia atómica de la ruta válida del personaje y el modelo seleccionado en `.auth/settings.json`.
+- Precedencia CLI > preferencias guardadas > valores de respaldo, con recuperación ante configuración corrupta o rutas/modelos no disponibles.
+- Visibilidad del nombre validado de cada herramienta y callback opcional `on_tool_call(tool_name, ok_status)` en `answer`.
+- Pruebas de comandos locales, ciclo de vida de memorias, preferencias de inicio, callbacks y compatibilidad.
+
+### Conservado
+
+- `auth.py`, `state_monitor.py`, `tools.py` y `wiki_client.py` sin cambios.
+- Siete herramientas y protocolo SIWC intactos; el callback es local y no modifica el payload de Responses.
+- La interfaz continúa siendo de consola; no incluye todavía API local ni GUI.
+
+
 ## 0.2.1 — 2026-11-09
 
 ### Corregido

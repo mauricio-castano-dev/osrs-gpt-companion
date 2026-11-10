@@ -101,8 +101,9 @@ Para verificar a instalação com **dados fictícios**, sem entrar na conta:
 ```
 
 `examples/player.example.json` contém dados fictícios apenas para verificar a
-instalação. Para usar seu estado real, inicie sempre com `--state-file` apontando
-para `<nome_do_personagem>.json` na pasta escolhida no Character Snapshot.
+instalação. Para usar seu estado real pela primeira vez, passe `--state-file`
+apontando para `<nome_do_personagem>.json` na pasta escolhida no Character Snapshot.
+O último caminho válido selecionado explicitamente fica salvo para as próximas sessões.
 
 ## 🧭 Como funciona
 
@@ -186,6 +187,9 @@ monstro ou nível retorna até **25 tarefas**, respeitando `status_filter`.
 | Comando | Ação |
 | --- | --- |
 | `/salir` | Fecha o console e mantém a sessão de autenticação. |
+| `/estado` | Mostra um resumo local do personagem, atualização, GP e canteiros ativos, sem consultar o modelo. |
+| `/memorias` | Lista as últimas 20 memórias com IDs e datas, sem consultar o modelo. |
+| `/olvidar ID` | Exclui uma memória local pelo ID e informa se existia; sem chamada ao modelo. |
 | `/limpiar` | Limpa o histórico em memória; preserva as memórias do SQLite. |
 | `/uso` | Abre os controles de uso do ChatGPT. |
 | `/logout` | Tenta revogar a sessão e remove os tokens locais. |
@@ -203,6 +207,44 @@ monstro ou nível retorna até **25 tarefas**, respeitando `status_filter`.
 # Validar o JSON sem consultar o modelo
 .\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
+
+
+### Comandos locais e preferências de inicialização
+
+`/estado` mostra cinco linhas com `ok`, `lastUpdated`, nome, nível de combate,
+mundo, GP equivalentes no banco/inventário e quantidade de canteiros ativos.
+Se o estado estiver indisponível, informa isso sem apresentar valores antigos
+como atuais. `/memorias` mostra `[#id] (created_at) tema: contenido`;
+`/olvidar 3` exclui a memória com ID 3 ou informa que ela não existe. Esses
+comandos não geram inferências nem entram no histórico enviado ao modelo.
+O catálogo de modelos e a autenticação ainda podem acessar a rede ao iniciar.
+
+As opções explícitas `--state-file` e `--model` têm prioridade sobre os valores
+salvos em `.auth/settings.json`. Um caminho só é salvo após o JSON carregar
+corretamente; `--check-state --state-file ...` também permite salvá-lo sem
+consultar a OpenAI. O modelo é salvo após validação no catálogo. Se o caminho
+salvo não existir mais, usa-se o caminho padrão de compatibilidade. Se o modelo
+salvo não estiver disponível, seleciona-se o primeiro do catálogo. Esses valores
+de fallback não substituem suas escolhas salvas. Configurações corrompidas são
+ignoradas e podem ser substituídas por opções válidas.
+
+Depois de escolher o caminho e o modelo, você pode iniciar com:
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+### Visibilidade de ferramentas e gancho para interface
+
+O console mostra `[Consultando herramienta: query_player_stats]` com o nome
+validado de cada chamada nova. `answer(question, model, history, router,
+on_tool_call=None)` aceita um observador opcional que recebe `(tool_name,
+ok_status)` após a execução. Erros estruturados informam `False`; um salvamento
+duplicado já satisfeito continua sendo sucesso. Nomes desconhecidos usam o rótulo
+de ferramenta local e informam `local`. Os argumentos não são registrados.
+Chamadas repetidas com o mesmo ID não são executadas nem notificadas novamente.
+Falhas do observador são informadas sem interromper o turno. O gancho prepara
+uma interface futura; esta versão continua sendo um aplicativo de console.
 
 ## 🗂 Estrutura do projeto
 
@@ -235,6 +277,7 @@ osrs-gpt-companion/
 | --- | --- |
 | `.auth/host.json` | Identificador persistente da instalação. |
 | `.auth/profile.dpapi` | Credenciais criptografadas para o usuário atual do Windows. |
+| `.auth/settings.json` | Último caminho de estado válido e modelo escolhidos explicitamente pela CLI; gravação atômica. |
 | `memories.sqlite3` | Metas e preferências persistentes; **sem criptografia**. |
 | Cache do catálogo | Mapping de itens da OSRS Wiki em RAM; expira após seis horas. |
 | `<nome_do_personagem>.json` | Dados exportados pelo Character Snapshot na pasta escolhida. |
@@ -280,9 +323,11 @@ chamadas incompletas de ferramentas não são executadas.
 
 - [x] Consultas específicas de habilidades, itens e missões para reduzir o contexto.
 - [x] Integração de consultas à OSRS Wiki e aos preços do Grand Exchange.
-- [ ] Seleção de personagem e configuração persistente de caminhos.
-- [ ] Gerenciamento de memórias: listar, atualizar e excluir preferências.
-- [ ] Mais visibilidade sobre o uso e o estado de atualização do RuneLite.
+- [x] Seleção do arquivo do personagem pela CLI e persistência de caminho/modelo.
+- [x] Listagem e exclusão local de memórias por ID.
+- [ ] Edição direta de memórias existentes.
+- [x] Nomes das ferramentas executadas, callback para UI e consulta local do estado.
+- [ ] Métricas detalhadas de consumo por consulta.
 
 As tarefas marcadas estão implementadas; as pendentes são melhorias planejadas.
 
