@@ -5,7 +5,7 @@
 **Tu personaje, tus objetivos y un agente que recuerda cómo te gusta jugar.**
 
 Un asistente de consola para **Old School RuneScape**, construido en Python,
-con estado exportado por RuneLite, memoria local y herramientas que el modelo
+con estado exportado por el plugin **Character Snapshot** de RuneLite, memoria local y herramientas que el modelo
 puede consultar durante la conversación.
 
 ![Estado](https://img.shields.io/badge/estado-prototipo-orange)
@@ -29,7 +29,7 @@ Conversa sobre tu progreso y conserva tus preferencias entre sesiones:
 >
 > «¿Qué había guardado sobre Dragon Slayer?»
 
-- **Estado actualizado en memoria:** observa el JSON exportado por RuneLite con `watchdog`.
+- **Estado actualizado en memoria:** observa el JSON exportado por **Character Snapshot** con `watchdog`.
 - **Memoria persistente:** guarda y recupera metas o gustos mediante SQLite FTS5.
 - **Invocación de herramientas:** el modelo puede consultar datos, revisar recuerdos y guardar preferencias antes de responder.
 - **Sign in with ChatGPT:** autenticación OAuth local con PKCE, renovación de tokens y almacenamiento cifrado mediante Windows DPAPI.
@@ -45,7 +45,8 @@ y las memorias que consulta el modelo se envían como contexto de esas solicitud
 - Windows y Python **3.11 o posterior**.
 - Git, para clonar el proyecto.
 - Una cuenta elegible de ChatGPT con permiso para usar su plan mediante SIWC.
-- Un archivo JSON compatible exportado por RuneLite. Este repositorio no instala el exportador.
+- RuneLite con el plugin **Character Snapshot** instalado y habilitado. Este repositorio no instala el plugin.
+- El archivo JSON del personaje generado por Character Snapshot en la carpeta que elijas.
 
 ### Instalación
 
@@ -62,13 +63,25 @@ python -m venv .venv
 
 No hace falta activar el entorno ni configurar `OPENAI_API_KEY`.
 
-### Conecta tu exportación
+### Configura Character Snapshot y conecta tu personaje
 
-Indica la ruta del archivo de tu personaje:
+1. En RuneLite, instala y habilita el plugin **Character Snapshot**.
+2. Cuando el plugin pregunte por la carpeta de exportación, selecciona la que quieras utilizar. **La carpeta la eliges tú**; no hay que asumir una ubicación automática dentro de `.runelite`.
+3. Localiza el JSON generado por el plugin. Su nombre es **el nombre del personaje seguido de `.json`**, no un nombre fijo del proyecto.
+4. Ejecuta el asistente con `--state-file`, indicando la ruta completa a ese archivo.
+
+Por ejemplo, si eliges `C:\OSRS\Snapshots` y tu personaje se llama
+`ExamplePlayer`, el archivo será `C:\OSRS\Snapshots\ExamplePlayer.json`:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --state-file "$HOME\.runelite\osrs-companion\TU_JUGADOR.json"
+.\.venv\Scripts\python.exe main.py --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
+
+Sustituye tanto la carpeta como `ExamplePlayer` por los valores de tu exportación.
+El nombre del archivo no se deduce del usuario de Windows, del usuario de GitHub
+ni del nombre del repositorio. Para varios personajes, indica el JSON del que
+quieras consultar en cada sesión. Usa las comillas también si la ruta o el nombre
+contienen espacios.
 
 El primer uso abre el navegador para iniciar sesión y autorizar el uso del plan.
 La elegibilidad, los modelos y los límites dependen de la cuenta y de los permisos concedidos.
@@ -79,15 +92,16 @@ Para comprobar la instalación con **datos ficticios**, sin iniciar sesión:
 .\.venv\Scripts\python.exe main.py --check-state --state-file .\examples\player.example.json
 ```
 
-En esta primera versión, si omites `--state-file`, el programa busca
-`kpn_hooligan.json` en `~/.runelite/osrs-companion/` y después junto a `main.py`.
-Usa una ruta explícita para tu propio personaje.
+Los datos de `examples/player.example.json` son ficticios y solo sirven para
+probar la instalación. Para usar tu estado real, inicia siempre con `--state-file`
+apuntando al archivo `<nombre_del_personaje>.json` de la carpeta elegida en
+Character Snapshot.
 
 ## 🧭 Cómo funciona
 
 ```mermaid
 flowchart LR
-    R[Exportación JSON de RuneLite] --> W[Monitor watchdog]
+    R[Character Snapshot · JSON del personaje] --> W[Monitor watchdog]
     W --> C[Estado en memoria]
     U[Tu consulta] --> A[Agente · Responses API]
     A --> T[Herramientas locales]
@@ -97,14 +111,14 @@ flowchart LR
     A --> F[Respuesta en la consola]
 ```
 
-1. El monitor carga el archivo y actualiza la caché cuando detecta cambios, incluidos reemplazos completos.
+1. Character Snapshot exporta los datos a la carpeta elegida. El monitor carga el JSON indicado y actualiza la caché cuando detecta cambios, incluidos reemplazos completos.
 2. Tu mensaje se envía al modelo junto con las instrucciones y los esquemas de herramientas.
 3. El modelo puede solicitar una o varias funciones. Python valida los argumentos y ejecuta únicamente las funciones permitidas.
 4. Los resultados vuelven al modelo mediante `function_call_output`, asociado al `call_id` original.
 5. El ciclo continúa hasta una respuesta final, con límites de **8 rondas** y **24 llamadas** por turno.
 
 Los cambios del archivo actualizan la caché; las consultas al modelo se realizan
-durante tus turnos de chat. El monitor observa la última exportación disponible,
+durante tus turnos de chat. El monitor observa la última exportación disponible de Character Snapshot;
 no comprueba por sí mismo que RuneLite siga conectado.
 
 ## 🛠 Herramientas del agente
@@ -138,10 +152,10 @@ No es una búsqueda semántica ni una consulta a internet.
 .\.venv\Scripts\python.exe main.py --models
 
 # Elegir un modelo y el archivo del personaje
-.\.venv\Scripts\python.exe main.py --model SLUG --state-file 'C:\ruta\TU_JUGADOR.json'
+.\.venv\Scripts\python.exe main.py --model SLUG --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 
 # Comprobar el JSON sin consultar al modelo
-.\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\ruta\TU_JUGADOR.json'
+.\.venv\Scripts\python.exe main.py --check-state --state-file 'C:\OSRS\Snapshots\ExamplePlayer.json'
 ```
 
 ## 🗂 Estructura
@@ -170,7 +184,7 @@ osrs-gpt-companion/
 | `.auth/host.json` | Identificador persistente de la instalación. |
 | `.auth/profile.dpapi` | Credenciales cifradas para el usuario actual de Windows. |
 | `memories.sqlite3` | Metas y preferencias persistentes; **sin cifrado**. |
-| JSON del jugador | Datos suministrados por el exportador de RuneLite. |
+| `<nombre_del_personaje>.json` | Datos exportados por Character Snapshot en la carpeta que seleccionaste. |
 
 Git excluye credenciales, bases de datos locales, archivos de personajes,
 entornos de Python y copias de seguridad. Los ejemplos publicados son ficticios.

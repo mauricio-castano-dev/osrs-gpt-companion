@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## Documentación — 2026-11-09
+
+- Identificado **Character Snapshot** como plugin exportador de RuneLite.
+- Aclarado que el usuario elige la carpeta de exportación en el plugin.
+- Corregidos los ejemplos para utilizar `<nombre_del_personaje>.json` y una ruta explícita mediante `--state-file`.
+- Eliminadas del README las suposiciones de una carpeta automática y un nombre de personaje fijo.
+
 ## 0.1.0 — 2026-11-09
 
 Primera iteración del agente interactivo de OSRS.
