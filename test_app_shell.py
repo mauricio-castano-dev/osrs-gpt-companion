@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 import launcher
 import main
 import state_monitor
+import web_app
 
 
 class FrozenDate(datetime):
@@ -63,6 +64,17 @@ class RelativeTimeTests(unittest.TestCase):
 
 
 class LauncherTests(unittest.TestCase):
+    def test_browser_flag_forces_external_browser_without_changing_default_serve_contract(self):
+        from unittest.mock import MagicMock
+        with tempfile.TemporaryDirectory() as folder:
+            monitor=MagicMock()
+            monitor.__enter__.return_value=monitor
+            with patch.object(sys,'argv',['main.py','--browser']), patch.object(main,'AUTH_DIR',Path(folder)), \
+                 patch.object(main,'host_id'), patch.object(main,'load_settings',return_value={}), \
+                 patch.object(main,'list_models',return_value=[{'slug':'test-model'}]), \
+                 patch.object(main,'StateMonitor',return_value=monitor),patch('web_app.serve') as serve:
+                main.run(default_ui=False)
+            serve.assert_called_once_with(monitor,'test-model',port=8765,prefer_native=False)
     def test_ui_default_explicit_ui_and_cli_modes_route_correctly(self):
         from unittest.mock import MagicMock
         for args, default_ui, expect_ui in [([], True, True), (['--cli'], True, False), (['--ui','--port','9000'], False, True)]:
@@ -116,6 +128,64 @@ class LauncherTests(unittest.TestCase):
         install.assert_called_once()
         models.assert_not_called()
         host.assert_not_called()
+
+
+class NativeWindowTests(unittest.TestCase):
+    def server_fixture(self):
+        from unittest.mock import MagicMock
+        server=MagicMock()
+        server.__enter__.return_value=server
+        server.origin='http://127.0.0.1:12345'
+        server.app.window=web_app.WindowController()
+        return server
+
+    def test_native_window_created_attached_and_server_shutdown_on_close(self):
+        server=self.server_fixture()
+        view=Mock()
+        window=view.create_window.return_value
+        def start(**kwargs):
+            self.assertTrue(server.app.window.state()['native'])
+            self.assertIs(server.app.window._window,window)
+        view.start.side_effect=start
+        with patch('web_app.create_server',return_value=server),patch.dict(sys.modules,{'webview':view}), \
+             patch('web_app.webbrowser.open') as browser,contextlib.redirect_stdout(io.StringIO()):
+            web_app.serve(Mock(),'model')
+        view.create_window.assert_called_once_with('RuneScribe · OSRS Companion',server.origin,
+            width=440,height=860,min_size=(360,580),resizable=True,on_top=False,background_color='#090d16')
+        view.start.assert_called_once()
+        server.shutdown.assert_called_once()
+        browser.assert_not_called()
+
+    def test_native_failure_stops_background_server_then_falls_back_to_browser(self):
+        server=self.server_fixture()
+        view=Mock()
+        view.start.side_effect=RuntimeError('Missing WebView2')
+        with patch('web_app.create_server',return_value=server),patch.dict(sys.modules,{'webview':view}), \
+             patch('web_app.webbrowser.open') as browser,contextlib.redirect_stdout(io.StringIO()):
+            web_app.serve(Mock(),'model')
+        server.shutdown.assert_called_once()
+        self.assertEqual(server.serve_forever.call_count,2)
+        browser.assert_called_once_with(server.origin)
+        self.assertFalse(server.app.window.state()['native'])
+
+    def test_browser_fallback_and_explicit_browser_skip_native_start(self):
+        for prefer_native in (False,True):
+            server=self.server_fixture()
+            with patch('web_app.create_server',return_value=server),patch.dict(sys.modules,{'webview':None}), \
+                 patch('web_app.webbrowser.open') as browser,contextlib.redirect_stdout(io.StringIO()):
+                web_app.serve(Mock(),'model',prefer_native=prefer_native)
+            browser.assert_called_once_with(server.origin)
+            server.shutdown.assert_not_called()
+            server.serve_forever.assert_called_once_with(poll_interval=0.2)
+
+    def test_closing_mock_native_window_releases_real_http_port(self):
+        from urllib.parse import urlsplit
+        view=Mock()
+        with patch.dict(sys.modules,{'webview':view}),patch('web_app.webbrowser.open'),contextlib.redirect_stdout(io.StringIO()):
+            web_app.serve(Mock(),'model',port=0)
+        port=urlsplit(view.create_window.call_args.args[1]).port
+        with web_app.create_server(Mock(),'model',port) as server:
+            self.assertEqual(server.server_port,port)
 
 
 if __name__ == '__main__':

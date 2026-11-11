@@ -4,6 +4,7 @@ import json
 import secrets
 import socket
 import sqlite3
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,12 +23,67 @@ UI_ROOT = Path(__file__).resolve().parent / 'ui'
 DIST_ROOT = Path(__file__).resolve().parent / 'frontend' / 'dist'
 ASSET_TYPES = {'.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
                '.svg': 'image/svg+xml'}
+WINDOW_MODES = {'compact': (440, 860), 'wide': (1180, 860)}
 
 
 class ApiError(ValueError):
     def __init__(self, status, message):
         super().__init__(message)
         self.status = status
+
+
+class WindowController:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.native = False
+        self.always_on_top = False
+        self.mode = 'compact'
+        self._window = None
+
+    def attach(self, window):
+        with self._lock:
+            self._window = window
+            self.native = True
+
+    def detach(self):
+        with self._lock:
+            self._window = None
+            self.native = False
+
+    def _state(self):
+        width, height = WINDOW_MODES[self.mode]
+        return {'native': self.native, 'always_on_top': self.always_on_top,
+                'mode': self.mode, 'width': width, 'height': height}
+
+    def state(self):
+        with self._lock:
+            return self._state()
+
+    def update(self, data):
+        if (not isinstance(data, dict) or not data or not set(data) <= {'always_on_top', 'mode'}
+                or ('always_on_top' in data and not isinstance(data['always_on_top'], bool))
+                or ('mode' in data and data['mode'] not in ('compact', 'wide'))):
+            raise ApiError(400, 'Configuración de ventana inválida.')
+        with self._lock:
+            pin = data.get('always_on_top', self.always_on_top)
+            mode = data.get('mode', self.mode)
+            try:
+                if self._window is not None:
+                    if pin != self.always_on_top:
+                        self._window.on_top = pin
+                    if mode != self.mode:
+                        self._window.resize(*WINDOW_MODES[mode])
+            except Exception:
+                # No confirmar un estado que el sistema operativo no pudo aplicar.
+                if self._window is not None and pin != self.always_on_top:
+                    try:
+                        self._window.on_top = self.always_on_top
+                    except Exception:
+                        pass
+                raise ApiError(502, 'No se pudo cambiar la ventana nativa.') from None
+            self.always_on_top = pin
+            self.mode = mode
+            return 200, {'ok': True, 'window': self._state()}
 
 
 def allowed_request(client, host, origin, fetch_site, expected):
@@ -41,7 +97,7 @@ def allowed_request(client, host, origin, fetch_site, expected):
 
 class AppState:
     def __init__(self, monitor, model, router=None, answer_fn=None, models_fn=None, save_settings_fn=None,
-                 ge_fn=None, wiki_fn=None):
+                 ge_fn=None, wiki_fn=None, window_controller=None):
         # Importacion diferida: main carga web_app solo al iniciar la interfaz.
         if save_settings_fn is None:
             from main import save_settings
@@ -54,6 +110,7 @@ class AppState:
         self.save_settings_fn = save_settings_fn
         self.ge_fn = ge_fn or check_ge_price
         self.wiki_fn = wiki_fn or search_osrs_wiki
+        self.window = window_controller if window_controller is not None else WindowController()
         self.available_models = None
         self.models_lock = threading.Lock()
         self.history = []
@@ -117,7 +174,7 @@ class AppState:
                 'items': self.monitor.query_items('', 'all'),
                 'quests': self.monitor.query_quests_diaries('', 'all', 'all'),
                 **self.freshness(), 'model': self.model, 'state_file': str(self.monitor.path),
-                'busy': busy, 'active_tools': active_tools}
+                'busy': busy, 'active_tools': active_tools, 'window': self.window.state()}
 
     def chat(self, message):
         # Una peticion simultanea no debe bloquear silenciosamente y enviar otra inferencia.
@@ -217,6 +274,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/api/status':
                 self.json(200, self.server.app.status())
+            elif path == '/api/window':
+                self.json(200, {'window': self.server.app.window.state()})
             elif path == '/api/progress':
                 params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
                 self.json(200, self.server.app.progress_payload(
@@ -287,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.permitted(mutation=True):
             return
         path = urlsplit(self.path).path
-        if path not in ('/api/chat', '/api/memories', '/api/memories/delete', '/api/model') or (self.command == 'DELETE' and path != '/api/memories/delete'):
+        if path not in ('/api/chat', '/api/memories', '/api/memories/delete', '/api/model', '/api/window') or (self.command == 'DELETE' and path != '/api/memories/delete'):
             self.json(404, {'error': 'Ruta no disponible.'})
             return
         try:
@@ -301,7 +360,10 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode('utf-8'))
             if not isinstance(data, dict):
                 raise ValueError('Se requiere un objeto JSON.')
-            if path == '/api/model':
+            if path == '/api/window':
+                status, result = self.server.app.window.update(data)
+                self.json(status, result)
+            elif path == '/api/model':
                 status, result = self.server.app.change_model(data)
                 self.json(status, result)
             elif path == '/api/memories':
@@ -332,6 +394,8 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Escribe un mensaje de hasta 8000 caracteres.')
                 status, result = self.server.app.chat(message.strip())
                 self.json(status, result)
+        except ApiError as exc:
+            self.json(exc.status, {'error': str(exc)})
         except (ValueError, UnicodeError, OverflowError):
             self.json(400, {'error': 'Datos de peticion invalidos.'})
         except (CompanionError, requests.RequestException, sqlite3.Error):
@@ -341,8 +405,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def create_server(monitor, model, port=8765, router=None, answer_fn=None, models_fn=None, save_settings_fn=None,
-                  ge_fn=None, wiki_fn=None):
-    app = AppState(monitor, model, router, answer_fn, models_fn, save_settings_fn, ge_fn, wiki_fn)
+                  ge_fn=None, wiki_fn=None, window_controller=None):
+    app = AppState(monitor, model, router, answer_fn, models_fn, save_settings_fn, ge_fn, wiki_fn, window_controller)
     try:
         return LocalServer(port, app)
     except OSError as exc:
@@ -351,10 +415,39 @@ def create_server(monitor, model, port=8765, router=None, answer_fn=None, models
         raise
 
 
-def serve(monitor, model, port=8765, open_browser=True):
+def serve(monitor, model, port=8765, open_browser=True, prefer_native=True):
     with create_server(monitor, model, port) as server:
-        print(f'OSRS GPT Companion: {server.origin}')
+        print(f'RuneScribe: {server.origin}')
         print('Pulsa Ctrl+C para cerrar el servidor local.')
+        if open_browser and prefer_native:
+            try:
+                import webview
+            except Exception:
+                webview = None
+            if webview is not None:
+                worker = threading.Thread(target=server.serve_forever,
+                                          kwargs={'poll_interval': 0.2}, daemon=True)
+                started = False
+                completed = False
+                try:
+                    worker.start()
+                    started = True
+                    window = webview.create_window(
+                        'RuneScribe · OSRS Companion', server.origin,
+                        width=440, height=860, min_size=(360, 580), resizable=True,
+                        on_top=False, background_color='#090d16')
+                    server.app.window.attach(window)
+                    webview.start(gui='edgechromium' if sys.platform == 'win32' else None)
+                    completed = True
+                except Exception:
+                    server.app.window.detach()
+                    print('Ventana nativa no disponible; abriendo el navegador.')
+                finally:
+                    if started:
+                        server.shutdown()
+                        worker.join(timeout=5)
+                if completed:
+                    return
         if open_browser:
             webbrowser.open(server.origin)
         server.serve_forever(poll_interval=0.2)

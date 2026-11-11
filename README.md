@@ -89,7 +89,7 @@ osrs-companion-ui
 osrs-companion --cli
 ```
 
-`osrs-companion` abre la interfaz en el navegador por defecto. `--cli` mantiene
+`osrs-companion` abre una ventana nativa por defecto; `--browser` fuerza el navegador. `--cli` mantiene
 el chat de consola. También puedes hacer doble clic en `osrs-companion-ui.cmd`
 en la carpeta del proyecto. Los lanzadores usan rutas absolutas al Python de
 `.venv` y a `main.py`; se instalan también en `%LOCALAPPDATA%\OSRSGPTCompanion\bin`.
@@ -452,6 +452,28 @@ y enlaces HTTPS al dominio exacto de OSRS Wiki. Las consultas requieren conexió
 un error externo devuelve 502 sin revelar detalles internos. El navegador solo
 consulta al servidor loopback y mantiene `connect-src 'self'`.
 
+### Ventana nativa y controles en vivo (0.8.0)
+
+En Windows, `osrs-companion` abre una ventana propia con **pywebview y Microsoft
+Edge WebView2**. Instala el runtime WebView2 de Microsoft si no está disponible.
+La ventana comienza en **440×860**, se puede redimensionar y tiene un mínimo de
+360×580. **Pin** la mantiene siempre visible junto a RuneLite; el menú permite
+alternar entre **Vista Sidekick móvil (440px)** y **Vista Escritorio (1180px)**,
+ambas con una altura de 860. Los controles funcionan incluso durante el chat y
+no invocan al modelo. Pin y la vista se conservan solo durante la sesión; las
+dimensiones informadas corresponden a la vista elegida, no al ajuste manual.
+
+`osrs-companion --browser` fuerza el navegador externo. Si pywebview o WebView2
+no pueden iniciarse, se abre el navegador automáticamente y los controles de
+ventana quedan deshabilitados. Al cerrar la ventana nativa se apaga el servidor
+HTTP y se libera el puerto. En modo navegador, detén el servidor con Ctrl+C.
+Esta entrega abre una ventana nativa desde Python; no incluye un `.exe` autónomo.
+
+`GET /api/window` devuelve `window` con `native`, `always_on_top`, `mode`, `width`
+y `height`; también aparece en `/api/status`. `POST /api/window` acepta, por
+ejemplo, `{"always_on_top": true}` o `{"mode": "wide"}`, con las mismas defensas
+loopback, Host, Origin, Sec-Fetch-Site y CSRF. Usa un lock independiente del chat.
+
 ### Interfaz modular React y modo Sidekick (0.7.0)
 
 La interfaz principal vive en `frontend/src/`: React 19, TypeScript estricto,
@@ -477,7 +499,7 @@ El respaldo del navegador sigue siendo parcial: no representa todo el catálogo.
 Python sirve `/assets/*.js`, `.css` y `.svg` solo tras resolver la ruta y verificar
 que permanece dentro de `frontend/dist/`. Mantiene MIME seguro, CSP, CSRF, origen
 y `no-store`. `/app.js`, `/app.css` y `ui/` conservan la compatibilidad con la
-interfaz anterior y sus 33 pruebas DOM. Si no existe un build completo, se muestra
+interfaz anterior y sus 34 pruebas DOM. Si no existe un build completo, se muestra
 esa interfaz de respaldo. Una wheel creada después del build incluye los assets
 compilados: para usarla no hace falta Node. Desde un clon, compila antes de instalar.
 
@@ -586,9 +608,9 @@ eventos SSE válidos. Rechaza eventos malformados y respuestas sin confirmación
 de finalización; las llamadas de herramientas incompletas no se ejecutan.
 
 Node es necesario para compilar el frontend desde fuentes. `npm test` en
-`frontend/` ejecuta ocho pruebas React con Vitest y DOM simulado. Se conservan
-las 33 pruebas DOM anteriores en `tests/ui.test.cjs`, invocadas también por la
-suite Python cuando Node está disponible. La suite Python tiene 87 pruebas;
+`frontend/` ejecuta nueve pruebas React con Vitest y DOM simulado. Se conservan
+las 34 pruebas DOM anteriores en `tests/ui.test.cjs`, invocadas también por la
+suite Python cuando Node está disponible. La suite Python tiene 96 pruebas;
 la verificación del bundle requiere ejecutar primero `npm run build`.
 
 ## 📌 Alcance actual

@@ -7,7 +7,13 @@ import {
   type ReactNode,
 } from "react";
 import { api, errorText } from "./client";
-import type { ChatReply, Message, Model, Status } from "@/types/osrs";
+import type {
+  ChatReply,
+  Message,
+  Model,
+  Status,
+  WindowState,
+} from "@/types/osrs";
 interface State {
   status: Status | null;
   connected: boolean;
@@ -19,6 +25,9 @@ interface State {
   ask: (text: string) => Promise<boolean>;
   changeModel: (slug: string) => Promise<void>;
   notesRevision: number;
+  windowPending: boolean;
+  toggleAlwaysOnTop: () => Promise<void>;
+  toggleWindowMode: () => Promise<void>;
 }
 const Context = createContext<State | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -28,18 +37,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [error, setError] = useState(""),
     [models, setModels] = useState<Model[]>([]),
     [messages, setMessages] = useState<Message[]>([]),
-    [notesRevision, setNotes] = useState(0);
+    [notesRevision, setNotes] = useState(0),
+    [windowPending, setWindowPending] = useState(false);
   const pendingRef = useRef(false),
-    id = useRef(0);
+    id = useRef(0),
+    windowRequest = useRef(false),
+    windowRevision = useRef(0);
   useEffect(() => {
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       let fast = pendingRef.current;
+      const revision = windowRevision.current;
       try {
         const value = await api<Status>("/api/status", undefined, abort.signal);
         if (abort.signal.aborted) return;
-        setStatus(value);
+        setStatus((previous) =>
+          revision === windowRevision.current
+            ? value
+            : { ...value, window: previous?.window || value.window },
+        );
         setConnected(true);
         fast ||= !!value.busy;
       } catch {
@@ -109,6 +126,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setError(errorText(err));
     }
   }
+  async function updateWindow(data: Partial<WindowState>) {
+    if (windowRequest.current || !status?.window?.native) return;
+    windowRequest.current = true;
+    windowRevision.current++;
+    setWindowPending(true);
+    try {
+      const result = await api<{ window: WindowState }>("/api/window", data);
+      windowRevision.current++;
+      setStatus((previous) =>
+        previous ? { ...previous, window: result.window } : previous,
+      );
+      setError("");
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      windowRequest.current = false;
+      setWindowPending(false);
+    }
+  }
+  const toggleAlwaysOnTop = () =>
+    updateWindow({ always_on_top: !status?.window?.always_on_top });
+  const toggleWindowMode = () =>
+    updateWindow({
+      mode: status?.window?.mode === "wide" ? "compact" : "wide",
+    });
   return (
     <Context.Provider
       value={{
@@ -122,6 +164,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ask,
         changeModel,
         notesRevision,
+        windowPending,
+        toggleAlwaysOnTop,
+        toggleWindowMode,
       }}
     >
       {children}

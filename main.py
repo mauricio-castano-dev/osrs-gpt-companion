@@ -173,8 +173,9 @@ def run(default_ui=False, force_ui=False):
     parser.add_argument('--model', help='Slug de uno de los modelos disponibles')
     parser.add_argument('--state-file', help='Ruta al JSON de Character Snapshot; reutiliza la ultima ruta valida guardada')
     interface = parser.add_mutually_exclusive_group()
-    interface.add_argument('--ui', action='store_true', help='Abrir la interfaz OSRS en el navegador')
+    interface.add_argument('--ui', action='store_true', help='Abrir la interfaz RuneScribe')
     interface.add_argument('--cli', action='store_true', help='Usar el chat de consola')
+    parser.add_argument('--browser', action='store_true', help='Abrir la interfaz en navegador externo')
     parser.add_argument('--port', type=int, default=8765, help='Puerto local de UI; 0 elige uno libre')
     parser.add_argument('--install-path', '--install-shortcut', action='store_true', help='Instalar lanzadores en el PATH del usuario')
     args = parser.parse_args()
@@ -231,9 +232,12 @@ def run(default_ui=False, force_ui=False):
                 updates['model'] = model
             if updates:
                 save_settings(**updates)
-            if force_ui or args.ui or (default_ui and not args.cli):
+            if force_ui or args.ui or ((default_ui or args.browser) and not args.cli):
                 from web_app import serve
-                serve(monitor, model, port=args.port)
+                if args.browser:
+                    serve(monitor, model, port=args.port, prefer_native=False)
+                else:
+                    serve(monitor, model, port=args.port)
             else:
                 chat(model, monitor)
 

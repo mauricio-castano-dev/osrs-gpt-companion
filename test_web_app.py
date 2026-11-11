@@ -488,6 +488,69 @@ class WebTests(unittest.TestCase):
             self.assertIn('src="/app.js"', response.text)
             self.assertEqual(self.http.get(self.base + '/app.js', timeout=5).status_code, 200)
 
+    def test_window_updates_attached_native_even_while_chat_is_busy(self):
+        initial = self.http.get(self.base + '/api/window', timeout=5).json()['window']
+        self.assertEqual(initial, {'native':False,'always_on_top':False,'mode':'compact','width':440,'height':860})
+        window = Mock()
+        self.server.app.window.attach(window)
+        self.server.app.lock.acquire()
+        try:
+            result = self.post('/api/window', {'always_on_top':True,'mode':'wide'})
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue(window.on_top)
+            window.resize.assert_called_once_with(1180, 860)
+            status = self.http.get(self.base + '/api/status', timeout=5).json()
+            self.assertTrue(status['busy'])
+            self.assertEqual(status['window'], result.json()['window'])
+            self.assertTrue(status['window']['native'])
+            result = self.post('/api/window', {'always_on_top':False,'mode':'compact'})
+            self.assertEqual(result.status_code, 200)
+            self.assertFalse(window.on_top)
+            self.assertEqual(window.resize.call_args.args, (440,860))
+        finally:
+            self.server.app.lock.release()
+        self.answer.assert_not_called()
+        self.assertEqual(self.server.app.history, [])
+
+    def test_window_rejects_invalid_values_csrf_and_external_requests(self):
+        for data in ({},{'mode':'invalid'},{'mode':[]},{'always_on_top':1},{'always_on_top':'true'},
+                     {'always_on_top':None},{'width':440}, {'mode':'compact','extra':False},[]):
+            self.assertEqual(self.post('/api/window', data).status_code, 400, data)
+        response=self.http.post(self.base+'/api/window',data='null',headers={
+            'Content-Type':'application/json','X-CSRF-Token':self.server.app.csrf},timeout=5)
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(self.http.post(self.base + '/api/window',json={'mode':'wide'},timeout=5).status_code,403)
+        for headers in ({'Origin':'https://external.example'},{'Host':'rebind.example'},{'Sec-Fetch-Site':'cross-site'}):
+            self.assertEqual(self.post('/api/window', {'mode':'wide'}, **headers).status_code,403)
+        self.assertEqual(self.server.app.window.state()['mode'],'compact')
+        self.answer.assert_not_called()
+
+    def test_window_native_failure_returns_clean_error_and_keeps_previous_state(self):
+        window = Mock()
+        window.resize.side_effect = RuntimeError('private native details')
+        self.server.app.window.attach(window)
+        result = self.post('/api/window',{'always_on_top':True,'mode':'wide'})
+        self.assertEqual(result.status_code,502)
+        self.assertNotIn('private native details',result.text)
+        self.assertEqual(self.server.app.window.state()['mode'],'compact')
+        self.assertFalse(self.server.app.window.state()['always_on_top'])
+        self.assertFalse(window.on_top)
+        self.assertEqual(self.post('/api/window',{'always_on_top':True}).status_code,200)
+        self.assertTrue(window.on_top)
+
+    def test_injected_window_controller_is_reused_and_state_is_a_copy(self):
+        controller=web_app.WindowController()
+        controller.update({'mode':'wide'})
+        with web_app.create_server(self.monitor,'test',0,window_controller=controller) as server:
+            self.assertIs(server.app.window,controller)
+            state=server.app.status()['window']
+            self.assertEqual(state['width'],1180)
+            state['mode']='changed copy'
+            self.assertEqual(controller.state()['mode'],'wide')
+            controller.attach(Mock())
+            controller.detach()
+            self.assertFalse(controller.state()['native'])
+
 
 if __name__ == '__main__':
     unittest.main()

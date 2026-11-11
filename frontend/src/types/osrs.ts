@@ -101,7 +101,15 @@ export interface Progress {
   };
   cached?: boolean;
 }
+export interface WindowState {
+  native?: boolean;
+  always_on_top?: boolean;
+  mode?: "compact" | "wide";
+  width?: number;
+  height?: number;
+}
 export interface Status {
+  window?: WindowState;
   stats: Stats;
   items: Items;
   quests: Progress;

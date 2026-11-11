@@ -13,7 +13,7 @@ import { DirectOracle } from "@/features/oracle/DirectOracle";
 import { countdown } from "@/lib/format";
 import { cachedProgress } from "@/features/progress/cache";
 import { api } from "@/api/client";
-import type { Status } from "@/types/osrs";
+import type { Status, WindowState } from "@/types/osrs";
 vi.mock("@/api/client", async (original) => ({
   ...(await original<typeof import("@/api/client")>()),
   api: vi.fn(),
@@ -36,9 +36,21 @@ const status: Status = {
   busy: false,
 };
 beforeEach(() => {
+  let nativeWindow: WindowState = {
+    native: true,
+    always_on_top: false,
+    mode: "compact",
+    width: 440,
+    height: 860,
+  };
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation(async (path, body) => {
-    if (path === "/api/status") return status as never;
+    if (path === "/api/status")
+      return { ...status, window: nativeWindow } as never;
+    if (path === "/api/window") {
+      nativeWindow = { ...nativeWindow, ...(body as Partial<WindowState>) };
+      return { ok: true, window: nativeWindow } as never;
+    }
     if (path === "/api/models")
       return { models: [{ slug: "demo", display_name: "Demo" }] } as never;
     if (path.startsWith("/api/memories"))
@@ -77,6 +89,35 @@ beforeEach(() => {
   });
 });
 describe("RuneScribe modular frontend", () => {
+  it("pins and expands the native window using the local window endpoint without model calls", async () => {
+    render(<App />);
+    await screen.findByText("Example Player");
+    const pin = screen.getByRole("button", {
+      name: "Fijar ventana siempre visible",
+    });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(pin);
+    await waitFor(() => expect(pin).toHaveAttribute("aria-pressed", "true"));
+    expect(vi.mocked(api)).toHaveBeenCalledWith("/api/window", {
+      always_on_top: true,
+    });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Abrir menú" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    const expand = await screen.findByRole("menuitem", {
+      name: "Vista Escritorio (1180px)",
+    });
+    fireEvent.click(expand);
+    await waitFor(() =>
+      expect(vi.mocked(api)).toHaveBeenCalledWith("/api/window", {
+        mode: "wide",
+      }),
+    );
+    expect(
+      vi.mocked(api).mock.calls.some(([path]) => path === "/api/chat"),
+    ).toBe(false);
+  });
   it("prerenders semantic IDs exactly once without client credentials", () => {
     const html = renderToString(<App />);
     for (const id of [

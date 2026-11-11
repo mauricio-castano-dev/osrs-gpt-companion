@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## 0.8.0 — 2026-11-11
+
+- Ventana nativa pywebview con Edge WebView2 en Windows, inicialmente 440×860; cierre con apagado del servidor y liberación del puerto.
+- Pin siempre visible y cambio entre Sidekick 440×860 y escritorio 1180×860 desde React y la interfaz legacy, incluso durante el chat y sin inferencia.
+- WindowController thread-safe y GET/POST `/api/window`, con validación, errores sanitizados y protecciones CSRF/Origin/Host/Sec-Fetch-Site; estado incluido en `/api/status`.
+- `--browser` fuerza el navegador externo; fallback automático si el motor nativo no inicia. Controles nativos deshabilitados en navegador.
+- Documentación sincronizada en español, inglés y portugués; dependencia Windows `pywebview>=5.3,<7`.
+- Validación: 96 pruebas Python, nueve React y 34 casos DOM; apertura, Pin, cambio de tamaño y cierre comprobados también con WebView2 real y datos ficticios.
+
 ## 0.7.0 — 2026-11-11
 
 ### Añadido

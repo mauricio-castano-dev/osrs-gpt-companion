@@ -1,4 +1,12 @@
-import { Menu, Backpack, BookOpen, NotebookPen, RotateCcw } from "lucide-react";
+import {
+  Menu,
+  Backpack,
+  BookOpen,
+  NotebookPen,
+  RotateCcw,
+  Pin,
+  PanelsTopLeft,
+} from "lucide-react";
 import { useApp } from "@/api/AppContext";
 import { useClock } from "@/hooks/useClock";
 import { relative } from "@/lib/format";
@@ -21,7 +29,19 @@ export function TopAppBar({
   navigate: (section: Section) => void;
   openBank: () => void;
 }) {
-  const { status, connected, busy, models, ask, changeModel } = useApp();
+  const {
+    status,
+    connected,
+    busy,
+    models,
+    ask,
+    changeModel,
+    windowPending,
+    toggleAlwaysOnTop,
+    toggleWindowMode,
+  } = useApp();
+  const native = Boolean(status?.window?.native);
+  const pinned = Boolean(status?.window?.always_on_top);
   useClock();
   return (
     <header className="top-app-bar">
@@ -55,6 +75,19 @@ export function TopAppBar({
           {connected ? relative(status?.lastUpdated) : "sin datos actuales"}
         </small>
         <div className="quick-actions">
+          <Button
+            className="window-pin"
+            variant="outline"
+            aria-label="Fijar ventana siempre visible"
+            aria-pressed={pinned}
+            disabled={!native || windowPending}
+            title={
+              native ? "Siempre visible" : "Disponible en la ventana nativa"
+            }
+            onClick={() => void toggleAlwaysOnTop()}
+          >
+            <Pin size={16} />
+          </Button>
           <Button variant="outline" aria-label="Abrir banco" onClick={openBank}>
             <Backpack size={16} />
           </Button>
@@ -80,6 +113,29 @@ export function TopAppBar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Ventana</DropdownMenuLabel>
+            <DropdownMenuItem
+              disabled={!native || windowPending}
+              onSelect={() => void toggleAlwaysOnTop()}
+            >
+              <Pin size={16} />
+              {pinned ? "Desfijar ventana" : "Fijar siempre visible"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!native || windowPending}
+              onSelect={() => void toggleWindowMode()}
+            >
+              <PanelsTopLeft size={16} />
+              {status?.window?.mode === "wide"
+                ? "Vista Sidekick móvil (440px)"
+                : "Vista Escritorio (1180px)"}
+            </DropdownMenuItem>
+            {!native && (
+              <p className="file-path">
+                Controles disponibles en la ventana nativa.
+              </p>
+            )}
+            <DropdownMenuSeparator />
             <DropdownMenuLabel>Accesos</DropdownMenuLabel>
             <DropdownMenuItem onSelect={openBank}>Abrir banco</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => navigate("oracle")}>

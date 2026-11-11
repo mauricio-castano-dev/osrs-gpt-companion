@@ -601,3 +601,16 @@ test('Oracle sends encoded direct queries, skips empty text and prevents late re
   assert.equal(byId('oracle-results').textContent,'Wiki unavailable');
   assert.equal(byId('oracle-submit').disabled,false);
 });
+
+test('Legacy window controls reflect native state and send pin changes directly',async()=>{
+  const {context,byId}=setup();
+  context.renderWindowControls({native:false,mode:'compact'});
+  assert.equal(byId('window-pin').disabled,true);
+  context.renderWindowControls({native:true,always_on_top:false,mode:'compact'});
+  const calls=[];
+  context.api=async(path,body)=>{calls.push([path,body]);return {window:{native:true,always_on_top:true,mode:'wide'}};};
+  await context.changeWindow({always_on_top:true});
+  assert.equal(calls[0][0],'/api/window');
+  assert.equal(byId('window-pin').attributes['aria-pressed'],'true');
+  assert.match(byId('window-mode').textContent,/Sidekick/);
+});

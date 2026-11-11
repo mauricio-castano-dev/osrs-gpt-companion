@@ -16,6 +16,8 @@ let memoryRequestSeq = 0;
 let memorySearchTimer;
 let memorySaving = false;
 let oracleRequestSeq = 0;
+let nativeWindowState = null;
+let windowUpdating = false;
 const oracleHint = 'Consulta precios en vivo del Grand Exchange o extractos de la OSRS Wiki sin usar el modelo.';
 const diaryTiers = ['easy','medium','hard','elite'];
 const number = (value) => typeof value === 'number' ? new Intl.NumberFormat('es-CO').format(value) : '—';
@@ -38,6 +40,20 @@ function node(tag, text, cls) {
   return item;
 }
 function error(message) { $('error').textContent = message; $('error').hidden = !message; }
+function renderWindowControls(state) {
+  nativeWindowState = state || null;
+  $('window-pin').disabled = !state?.native || windowUpdating;
+  $('window-mode').disabled = !state?.native || windowUpdating;
+  $('window-pin').setAttribute('aria-pressed',String(Boolean(state?.always_on_top)));
+  $('window-mode').textContent = state?.mode === 'wide' ? 'Vista Sidekick (440px)' : 'Vista Escritorio (1180px)';
+}
+async function changeWindow(data) {
+  if (windowUpdating || !nativeWindowState?.native) return;
+  windowUpdating = true; renderWindowControls(nativeWindowState);
+  try { const result = await api('/api/window',data); renderWindowControls(result.window); }
+  catch(e) { error(e.message); }
+  finally { windowUpdating = false; renderWindowControls(nativeWindowState); }
+}
 function refreshAges() {
   $('live-freshness').textContent = 'Reporte: ' + (statusOk ? relative(lastUpdated) : 'sin datos actuales');
   document.querySelectorAll('[data-report]').forEach(el => { el.textContent = 'Reporte: ' + relative(el.dataset.report); });
@@ -341,6 +357,7 @@ async function changeModel() {
 async function refreshStatus() {
   try {
     const data = await api('/api/status');
+    if (!windowUpdating) renderWindowControls(data.window);
     const stats = data.stats || {}, items = data.items || {};
     lastQuestsSnapshot = data.quests || null;
     lastStatsSnapshot = stats;
@@ -538,6 +555,8 @@ function tab(selected) {
   if (selected === 'memory') refreshMemories();
 }
 $('chat-form').addEventListener('submit',event => { event.preventDefault(); const text=$('message').value.trim(); if (!busy && text) { $('message').value=''; submit(text); } });
+$('window-pin').addEventListener('click',()=>changeWindow({always_on_top:!nativeWindowState?.always_on_top}));
+$('window-mode').addEventListener('click',()=>changeWindow({mode:nativeWindowState?.mode==='wide'?'compact':'wide'}));
 $('memory-form').addEventListener('submit',event => { event.preventDefault(); createMemory($('memory-topic').value,$('memory-text').value); });
 $('memory-search').addEventListener('input',queueMemorySearch);
 $('oracle-form').addEventListener('submit',event => { event.preventDefault(); runOracleQuery(); });

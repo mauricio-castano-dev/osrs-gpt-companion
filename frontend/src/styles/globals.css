@@ -915,3 +915,31 @@ textarea::placeholder {
     display: none;
   }
 }
+
+.window-pin[aria-pressed="true"] {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: #59431644;
+}
+@media (max-width: 1023px) {
+  .quick-actions {
+    display: flex;
+  }
+  .quick-actions > button:not(.window-pin) {
+    display: none;
+  }
+  .connection {
+    width: 8px;
+    height: 8px;
+    max-width: 8px;
+    padding: 0;
+    overflow: hidden;
+    color: transparent;
+    white-space: nowrap;
+    background: var(--muted);
+    border: 0;
+  }
+  .connection.online {
+    background: var(--green);
+  }
+}
