@@ -302,8 +302,7 @@ Achievement tiers, and highlighted KC. Missing data is reported without invented
 values; unavailable snapshots do not expose old values as current. Tabs support
 arrow keys, Home, and End.
 
-During a query, `GET /api/status` exposes `busy` and `active_tools`. Three-second
-polling updates the chat indicator with tools whose execution has completed.
+During a query, `GET /api/status` exposes `busy` and `active_tools`. Fast 600 ms polling during a turn updates the chat indicator with tools whose execution has completed.
 This is not token streaming or a notification that a tool has just started:
 it uses the post-execution callback. Progress clears on completion, failure, or
 history reset; the final response keeps its tool chips.
@@ -312,6 +311,86 @@ Chat groups `-`, `*`, or numbered items into HTML lists, recognizes `#`/`##`/`##
 headings, preserves code blocks, and skips redundant blank lines. Rendering uses
 DOM nodes and text, never `innerHTML` for character or model data. CSP and
 CSRF/origin protections remain in place.
+
+### Instant bank search and model switching
+
+In **Equipo & Progreso**, search by name or itemId under **Banco & Inventario**.
+After a 180 ms debounce, `GET /api/bank?q=...` queries the in-memory snapshot:
+it neither reads the JSON from disk nor calls OpenAI, so it uses no model tokens.
+Results include quantities, bank match and total counts, up to 30 bank items,
+and the filtered inventory. Queries allow up to 100 characters; unavailable
+snapshots do not show stale data. Speed depends on the computer; debounce and
+HTTP transport add latency.
+
+The chat header selector fetches your account catalog with `GET /api/models`
+once and caches it for the server session. `POST /api/model` validates the
+selection and saves it in `.auth/settings.json` for subsequent turns and restarts,
+preserving the conversation. Changes are blocked during a response and protected
+by CSRF. A persistence failure preserves the previous model. If catalog loading
+fails, the selector stays hidden and chat remains available with the current
+model. Reload the page to retry.
+
+While a message is being submitted, status polling runs every **600 ms**;
+the fast timer is cleared on both success and failure. The usual three-second
+refresh remains active outside a turn.
+
+### In-memory quest, diary, and combat achievement explorer
+
+Under **Equipo & Progreso → Misiones & Logros**, search by quest name, diary
+region/task, boss, or combat tier. Select `all`, `quests`, `diaries`, or
+`combat_achievements` and filter by `all`, `in_progress`, `incomplete`, or
+`completed`. Typing uses a 180 ms debounce; selector changes query immediately.
+An empty search with default filters makes no request. Out-of-order responses
+are discarded so the latest filter wins.
+
+`GET /api/progress?q=...&category=...&status=...` uses only the RAM monitor:
+no disk reads, model calls, or conversation history changes. Queries allow up to
+100 trimmed characters; invalid filters return 400. Results show up to 40 quests,
+30 tasks per diary, and 25 combat tasks with counts and truncation notices.
+Diary summaries count completed tiers against exported boolean tiers and show
+each region. Unavailable snapshots clear the summary; new queries do not expose
+old data as current.
+
+Existing monitor rules remain: diary details require a region/task text match;
+combat task details require a name, boss, ID, or tier search. Selecting only the
+combat category does not download its full catalog. `in_progress` applies to
+quests; diaries and combat tasks use completed/incomplete. Diary tiers retain
+their full context even when tasks are filtered. Previous search results do not
+refresh automatically; change a filter to query the in-memory snapshot again.
+
+### Modern retro interface and quick filters (0.5.0)
+
+The Obsidian Runic Slate & Amber Gold theme combines dark slate with gold, cyan,
+green, and violet. Pixelify Sans and Chakra Petch style the headings and HUD;
+Plus Jakarta Sans keeps chat and memories readable. Google Fonts loads these
+fonts; offline, Segoe UI, Consolas, and system fonts provide fallbacks. Font
+requests to Google are separate from agent tools. Character JSON and memories
+are not sent to load fonts.
+
+There are 39 original RPG-inspired SVG sprites embedded as CSS `data:` images,
+covering all 24 skills, equipment, and HUD resources. These are not official
+assets downloaded from Jagex. Skills expose `data-skill`, and levels of 99 or
+above use `.skill-max`. Diaries and combat tiers use two-column cards; the
+layout adapts to narrow screens and respects reduced-motion preferences.
+
+**Misiones & Logros** sits immediately after bank search and before equipment.
+**En curso**, **Misiones pendientes**, **Misiones completadas**, and
+**Diarios pendientes** apply category/status immediately, preserving search text.
+Quest rows retain exported state labels with state colors; empty category headings
+are omitted when another category contains results.
+
+Filters always attempt `/api/progress`. On failure, a previously received valid
+`/api/status` snapshot can be filtered in browser memory, with a visible **partial
+fallback** notice and report age. This copy lasts until page reload and uses no
+persistent storage. It contains at most the report's first 40 quests and diary/
+combat summaries, which may omit tasks. An empty fallback result does not prove
+that the character has no matches; query again with the server available for a
+complete filter. Without a valid copy, the usual local error remains. A newly
+received invalid snapshot disables the previous fallback.
+
+CSP allows only Google Fonts for external styles/fonts and `data:` sprites,
+retaining `script-src 'self'`, `connect-src 'self'`, and no `unsafe-inline`.
+Icons use spans/pseudo-elements; names remain safe text rather than HTML.
 
 ## 🗂 Project structure
 
@@ -382,7 +461,7 @@ The client accepts connections that omit `Content-Type` if the body contains
 valid SSE events. It rejects malformed events and responses without completion
 confirmation; incomplete tool calls are not executed.
 
-Optionally, Node.js runs seven additional rendering tests with a synthetic DOM.
+Optionally, Node.js runs twenty-five additional rendering tests with a synthetic DOM.
 It is not required to install, build, or use the application. When available,
 `python -m unittest -v` also runs this check.
 
@@ -394,7 +473,7 @@ It is not required to install, build, or use the application. When available,
 - Preference changes are stored as new dated records.
 - Failed requests are not automatically retried; memories already saved remain stored.
 - Descriptions tell the model when to check state; they do not guarantee it will do so in every answer.
-- External queries are limited to OSRS Wiki and its price API; general web browsing and game control are not included.
+- External query tools are limited to OSRS Wiki and its price API; general web browsing and game control are not included.
 - API failures return explicit tool errors; the agent must acknowledge that the information could not be verified.
 
 ## 🗺 Roadmap

@@ -1,5 +1,59 @@
 # Historial de cambios
 
+## 0.5.0 — 2026-11-10
+
+### Añadido
+
+- Tema Obsidian Runic Slate & Amber Gold con tipografía Pixelify Sans/Chakra Petch/Plus Jakarta Sans, alternativas del sistema, paneles biselados y diseño adaptable con movimiento reducido.
+- 39 sprites SVG originales en CSS, incluyendo las 24 habilidades, recursos y slots de equipo; `data-skill`, `.skill-max` e iconografía para las siete herramientas.
+- Explorador de progreso situado tras el banco, con cuatro botones de filtro inmediato y estados de misión coloreados.
+- Respaldo en memoria del navegador tras fallos de `/api/progress`, marcado como parcial y con edad del reporte; solo utiliza el subconjunto previamente recibido por `/api/status`.
+- Tres pruebas Python nuevas y siete casos DOM nuevos: 79 pruebas Python y 25 casos DOM en total. Comprobación visual con datos ficticios en escritorio y pantalla estrecha.
+- README sincronizados en tres idiomas y exportación local del código actualizada.
+
+### Corregido
+
+- Las categorías vacías no muestran encabezados redundantes junto a resultados de otra categoría.
+- Rechazos HTTP 403 con cuerpos pequeños: se descartan bytes de forma acotada antes de cerrar para evitar reinicios intermitentes de conexión en Windows; las validaciones y el bloqueo de mutaciones siguen activos.
+
+### Seguridad y compatibilidad
+
+- CSP ampliada exclusivamente para estilos/fuentes de Google Fonts y sprites `data:`; sin scripts externos ni `unsafe-inline`.
+- Loopback, Host, Origin, Sec-Fetch-Site, CSRF y `Cache-Control: no-store` conservados.
+- `auth.py`, `state_monitor.py`, `tools.py`, `wiki_client.py`, `memory_db.py`, `inference.py` y `launcher.py` intactos; protocolo SIWC sin cambios.
+
+## 0.4.3 — 2026-11-10
+
+### Añadido
+
+- `GET /api/progress` con búsqueda, categoría y estado validados; consulta en RAM sin inferencia ni cambios del historial.
+- Explorador de misiones, Achievement Diaries y Combat Achievements en Equipo & Progreso, con debounce de 180 ms, selectores inmediatos y descarte de respuestas fuera de orden.
+- Resumen de tiers de diarios por región; limpieza al quedar indisponible la instantánea.
+- Resultados con estados, cantidades y avisos de truncamiento (40 misiones, 30 tareas por diario, 25 tareas de combate), construidos con nodos DOM seguros.
+- Cuatro pruebas Python y seis casos DOM nuevos: 76 pruebas Python y 18 casos DOM en total.
+- README sincronizados en tres idiomas y exportación local del código actualizada.
+
+### Conservado
+
+- Los siete módulos protegidos, el protocolo SIWC, las validaciones HTTP y CSP/CSRF permanecen sin cambios.
+- Los detalles de tareas de combate siguen requiriendo texto de búsqueda; `in_progress` aplica a misiones.
+
+## 0.4.2 — 2026-11-10
+
+### Añadido
+
+- Buscador de banco e inventario en RAM con debounce de 180 ms, límite de 100 caracteres, 30 resultados del banco y descarte de respuestas atrasadas; no utiliza inferencia.
+- `GET /api/bank`, `GET /api/models` y `POST /api/model`, con catálogo cacheado por sesión, validación de slugs, CSRF y bloqueo durante una respuesta.
+- Selector de modelo en el chat con persistencia en `.auth/settings.json`; si falla la escritura, se mantiene el modelo anterior. Catálogo inaccesible: selector oculto sin error intrusivo.
+- Polling de estado cada 600 ms durante el turno, limpiado siempre al terminar o fallar.
+- Cinco pruebas Python nuevas y cinco pruebas JavaScript nuevas (12 casos DOM en total).
+- README sincronizados en tres idiomas y exportación local del código actualizada.
+
+### Conservado
+
+- `auth.py`, `state_monitor.py`, `tools.py`, `wiki_client.py`, `memory_db.py`, `inference.py` y `launcher.py` intactos.
+- CSP estricta, CSRF/origen, creación segura de nodos DOM y protocolo SIWC.
+
 ## 0.4.1 — 2026-11-10
 
 ### Añadido

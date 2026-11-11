@@ -310,7 +310,7 @@ antiguos como actuales si la instantánea no está disponible. Las pestañas se
 pueden recorrer con las flechas, Home y End del teclado.
 
 Durante una consulta, `GET /api/status` expone `busy` y `active_tools`. El polling
-de tres segundos actualiza el indicador del chat con las herramientas que ya
+rápido de 600 ms durante el turno actualiza el indicador del chat con las herramientas que ya
 terminaron su ejecución. No es streaming de tokens ni un aviso de inicio de cada
 herramienta: utiliza el callback posterior a la ejecución. El progreso se borra
 al terminar, fallar o limpiar el turno; los chips de la respuesta final permanecen.
@@ -319,6 +319,88 @@ El formato del chat agrupa listas con `-`, `*` o números en listas HTML, recono
 encabezados `#`/`##`/`###`, conserva bloques de código e ignora líneas vacías
 redundantes. Todo se construye con nodos DOM y texto, sin `innerHTML` para datos
 del modelo o del personaje. La política CSP y los controles CSRF/origen se conservan.
+
+### Banco instantáneo y modelo en caliente
+
+En **Equipo & Progreso**, busca por nombre o itemId en **Banco & Inventario**.
+La búsqueda espera 180 ms desde la última tecla y consulta `GET /api/bank?q=...`
+sobre la instantánea en RAM: no lee el JSON del disco ni llama a OpenAI, por lo
+que no consume tokens del modelo. Muestra cantidades, coincidencias del banco
+frente al total de objetos y hasta 30 resultados, además del inventario filtrado.
+Admite hasta 100 caracteres; una instantánea no disponible no muestra datos viejos.
+La velocidad depende del equipo; el debounce y el transporte HTTP añaden latencia.
+
+El selector del encabezado del chat obtiene una vez el catálogo de tu cuenta
+con `GET /api/models`, que queda en caché durante la sesión del servidor.
+`POST /api/model` valida la selección y guarda el modelo en `.auth/settings.json`
+para los siguientes turnos y reinicios, conservando la conversación. Está bloqueado
+durante una respuesta y protegido por CSRF. Si falla la persistencia, se conserva
+el modelo anterior. Si no se puede cargar el catálogo, el selector permanece oculto
+y el chat sigue disponible con el modelo actual. Recarga la página para reintentar.
+
+Durante el envío de un mensaje, el HUD consulta el estado cada **600 ms**;
+el temporizador rápido se elimina tanto al terminar como si hay un error.
+Fuera del turno se mantiene la actualización habitual cada tres segundos.
+
+### Explorador de misiones, diarios y logros en RAM
+
+En **Equipo & Progreso → Misiones & Logros** puedes buscar por nombre de misión,
+región o tarea de diario, jefe o tier de combate. Los selectores permiten elegir
+`all`, `quests`, `diaries` o `combat_achievements` y filtrar por `all`,
+`in_progress`, `incomplete` o `completed`. La escritura espera 180 ms; cambiar un
+selector consulta inmediatamente. Sin texto ni filtros activos no se envía consulta.
+Las respuestas atrasadas se descartan para conservar el último filtro elegido.
+
+`GET /api/progress?q=...&category=...&status=...` consulta exclusivamente el
+monitor en RAM, sin leer disco, llamar al modelo ni modificar el historial.
+Admite hasta 100 caracteres tras quitar espacios; filtros inválidos devuelven 400.
+Muestra hasta 40 misiones, 30 tareas por diario y 25 tareas de combate, indicando
+conteos y límites. El resumen de diarios muestra tiers completados frente a los
+tiers booleanos exportados y filas por región. Una instantánea no disponible
+limpia el resumen y las consultas nuevas no presentan datos antiguos como actuales.
+
+Se conservan las reglas del monitor: los detalles de diarios requieren texto que
+coincida con una región o tarea, y las tareas de combate requieren buscar por
+nombre, jefe, ID o tier. Elegir solo la categoría de combate no descarga su catálogo.
+El estado `in_progress` corresponde a misiones; diarios y tareas de combate usan
+completado/pendiente. Los tiers de cada diario muestran su contexto completo,
+aunque el filtro limite las tareas. Las consultas no refrescan resultados anteriores
+automáticamente: cambia el filtro para consultar de nuevo la instantánea en RAM.
+
+### Interfaz retro moderna y filtros rápidos (0.5.0)
+
+El tema Obsidian Runic Slate & Amber Gold combina pizarra oscura con oro, cian,
+verde y violeta. Pixelify Sans y Chakra Petch dan el estilo retro a títulos y HUD;
+Plus Jakarta Sans mantiene legibles el chat y las memorias. Las fuentes se cargan
+desde Google Fonts; sin conexión se usan Segoe UI, Consolas y fuentes del sistema.
+Esto añade solicitudes de fuentes a Google, independientes de las herramientas
+del agente. No se envían el JSON del personaje ni las memorias para cargar fuentes.
+
+Hay 39 sprites SVG originales de inspiración RPG, integrados en CSS mediante
+`data:`: las 24 habilidades, equipo y recursos del HUD. No son archivos oficiales
+descargados de Jagex. Las habilidades usan `data-skill` y los niveles de 99 o más
+se resaltan con `.skill-max`. Diarios y tiers de combate ocupan dos columnas;
+la interfaz se adapta a pantallas estrechas y respeta movimiento reducido.
+
+**Misiones & Logros** aparece justo después del banco y antes del equipo. Los
+botones **En curso**, **Misiones pendientes**, **Misiones completadas** y
+**Diarios pendientes** aplican categoría/estado inmediatamente y conservan el
+texto de búsqueda. Las misiones mantienen sus estados exportados, con color por
+estado; se omiten encabezados de categorías vacías cuando hay otros resultados.
+
+Cada filtro sigue intentando `/api/progress`. Si falla y existe una instantánea
+válida de `/api/status` recibida anteriormente, el navegador filtra esa copia
+en memoria y muestra un aviso de **respaldo parcial** con la edad del reporte.
+La copia dura solo hasta recargar la página; no usa almacenamiento persistente.
+Contiene como máximo las primeras 40 misiones del reporte y resúmenes de diarios
+y combate, que pueden carecer de tareas. Un resultado vacío del respaldo no prueba
+que el personaje no tenga coincidencias; vuelve a consultar con el servidor
+disponible para obtener el filtro completo. Sin copia válida se conserva el error
+local habitual. Una nueva instantánea inválida desactiva el respaldo anterior.
+
+La CSP permite únicamente Google Fonts para estilos/fuentes y `data:` para sprites,
+con `script-src 'self'`, `connect-src 'self'` y sin `unsafe-inline`. Los iconos usan
+spans/pseudoelementos; los nombres siguen siendo texto seguro y no HTML.
 
 ## 🗂 Estructura
 
@@ -390,7 +472,7 @@ El cliente admite conexiones que omiten `Content-Type` si el cuerpo contiene
 eventos SSE válidos. Rechaza eventos malformados y respuestas sin confirmación
 de finalización; las llamadas de herramientas incompletas no se ejecutan.
 
-Opcionalmente, Node.js permite ejecutar siete pruebas adicionales de renderizado
+Opcionalmente, Node.js permite ejecutar veinticinco pruebas adicionales de renderizado
 con un DOM sintético. No es necesario para instalar, compilar ni usar la aplicación.
 Si está disponible, `python -m unittest -v` ejecuta también esa comprobación.
 
@@ -402,7 +484,7 @@ Si está disponible, `python -m unittest -v` ejecuta también esa comprobación.
 - Los cambios de preferencias se guardan como nuevos registros fechados.
 - Si una consulta falla, las memorias ya guardadas se conservan y no se reintenta automáticamente.
 - Las descripciones indican al modelo cuándo consultar el estado; no constituyen una garantía de que lo haga en toda respuesta.
-- Las consultas externas se limitan a OSRS Wiki y su API de precios; no hay navegación web general ni control del juego.
+- Las herramientas de consulta externa se limitan a OSRS Wiki y su API de precios; no hay navegación web general ni control del juego.
 - Si una API falla, el agente recibe un error explícito y debe reconocer que no pudo verificar el dato.
 
 ## 🗺 Próximos pasos

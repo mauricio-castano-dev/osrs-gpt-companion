@@ -8,16 +8,22 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import requests
 from auth import CompanionError
-from inference import answer
+from inference import answer, list_models
 from memory_db import list_memories, delete_memory
 from state_monitor import format_relative_time
 from tools import ToolRouter
 
 UI_ROOT = Path(__file__).resolve().parent / 'ui'
+
+
+class ApiError(ValueError):
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
 
 
 def allowed_request(client, host, origin, fetch_site, expected):
@@ -30,20 +36,61 @@ def allowed_request(client, host, origin, fetch_site, expected):
 
 
 class AppState:
-    def __init__(self, monitor, model, router=None, answer_fn=None):
+    def __init__(self, monitor, model, router=None, answer_fn=None, models_fn=None, save_settings_fn=None):
+        # Importacion diferida: main carga web_app solo al iniciar la interfaz.
+        if save_settings_fn is None:
+            from main import save_settings
+            save_settings_fn = save_settings
         self.monitor = monitor
         self.model = model
         self.router = router if router is not None else ToolRouter(monitor)
         self.answer = answer_fn or answer
+        self.models_fn = models_fn or list_models
+        self.save_settings_fn = save_settings_fn
+        self.available_models = None
+        self.models_lock = threading.Lock()
         self.history = []
         self.lock = threading.Lock()
         self.active_tools = []
         self.tools_lock = threading.Lock()
         self.csrf = secrets.token_urlsafe(32)
 
+    def get_models(self):
+        with self.models_lock:
+            if self.available_models is None:
+                models = self.models_fn()
+                self.available_models = [
+                    {'slug': m['slug'], 'display_name': m.get('display_name') or m['slug']}
+                    for m in models if isinstance(m, dict) and isinstance(m.get('slug'), str)
+                    and m['slug'] and len(m['slug']) <= 200 and not any(ord(c) < 32 for c in m['slug'])]
+            return [dict(model) for model in self.available_models]
+
+    def change_model(self, data):
+        if set(data) != {'model'} or not isinstance(data['model'], str):
+            raise ValueError('Se requiere un modelo valido.')
+        if not self.lock.acquire(blocking=False):
+            return 409, {'error': 'Hay una respuesta en curso. Espera a que termine.'}
+        try:
+            slug = data['model']
+            if not any(model['slug'] == slug for model in self.get_models()):
+                raise ValueError('Modelo no disponible.')
+            # Persistir primero: un fallo de disco no cambia el modelo activo.
+            self.save_settings_fn(model=slug)
+            self.model = slug
+            return 200, {'ok': True, 'model': self.model}
+        finally:
+            self.lock.release()
+
     def freshness(self):
         timestamp = self.monitor.freshness_summary().get('lastUpdated')
         return {'lastUpdated': timestamp, 'freshness': format_relative_time(timestamp)}
+
+    def progress_payload(self, query='', category='all', status='all'):
+        if (not isinstance(query, str) or len(query.strip()) > 100 or '\x00' in query
+                or category not in ('all', 'quests', 'diaries', 'combat_achievements')
+                or status not in ('all', 'completed', 'incomplete', 'in_progress')):
+            raise ApiError(400, 'Filtro de progreso inválido: hasta 100 caracteres, categoría y estado válidos.')
+        return self.monitor.query_quests_diaries(query.strip(), category, status)
 
     def status(self):
         with self.tools_lock:
@@ -116,20 +163,33 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('X-Frame-Options', 'DENY')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         self.end_headers()
         self.wfile.write(body)
 
     def json(self, status, value):
         self.send_body(status, json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8'), 'application/json; charset=utf-8')
 
+    def deny(self, message):
+        # HTTP/1.0 cierra la conexion tras responder. En Windows, cerrar con un
+        # cuerpo pequeno sin consumir puede causar RST y perder el 403 enviado.
+        # Solo descartar bytes acotados; nunca interpretarlos ni ejecutar acciones.
+        if self.command in ('POST', 'DELETE') and not self.headers.get('Transfer-Encoding'):
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if 0 < length <= 65536:
+                    self.rfile.read(length)
+            except (ValueError, OSError):
+                pass
+        self.json(403, {'error': message})
+
     def permitted(self, mutation=False):
         if not allowed_request(self.client_address[0], self.headers.get('Host'), self.headers.get('Origin'),
                                self.headers.get('Sec-Fetch-Site'), self.server.origin):
-            self.json(403, {'error': 'Origen local no permitido.'})
+            self.deny('Origen local no permitido.')
             return False
         if mutation and not secrets.compare_digest(self.headers.get('X-CSRF-Token', '').encode('utf-8'), self.server.app.csrf.encode('ascii')):
-            self.json(403, {'error': 'Token de sesion invalido. Recarga la pagina.'})
+            self.deny('Token de sesion invalido. Recarga la pagina.')
             return False
         return True
 
@@ -140,6 +200,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == '/api/status':
                 self.json(200, self.server.app.status())
+            elif path == '/api/progress':
+                params = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+                self.json(200, self.server.app.progress_payload(
+                    params.get('q', [''])[0], params.get('category', ['all'])[0],
+                    params.get('status', ['all'])[0]))
+            elif path == '/api/bank':
+                q = parse_qs(urlsplit(self.path).query).get('q', [''])[0].strip()
+                if len(q) > 100 or '\x00' in q:
+                    self.json(400, {'error': 'Busca hasta 100 caracteres, sin caracteres nulos.'})
+                    return
+                self.json(200, self.server.app.monitor.query_items(q[:100], 'all'))
+            elif path == '/api/models':
+                models = self.server.app.get_models()
+                self.json(200, {'current': self.server.app.model, 'models': models})
             elif path == '/api/memories':
                 self.json(200, {'memories': list_memories(limit=30)})
             elif path in ('/', '/app.css', '/app.js'):
@@ -151,6 +225,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_body(200, data.encode('utf-8'), kind + '; charset=utf-8')
             else:
                 self.json(404, {'error': 'Ruta no disponible.'})
+        except ApiError as exc:
+            self.json(exc.status, {'error': str(exc)})
+        except (CompanionError, requests.RequestException):
+            self.json(502, {'error': 'No se pudo cargar el catalogo de modelos.'})
         except (OSError, sqlite3.Error, ValueError):
             self.json(500, {'error': 'No se pudieron cargar los datos locales.'})
 
@@ -167,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.permitted(mutation=True):
             return
         path = urlsplit(self.path).path
-        if path not in ('/api/chat', '/api/memories/delete') or (self.command == 'DELETE' and path != '/api/memories/delete'):
+        if path not in ('/api/chat', '/api/memories/delete', '/api/model') or (self.command == 'DELETE' and path != '/api/memories/delete'):
             self.json(404, {'error': 'Ruta no disponible.'})
             return
         try:
@@ -181,7 +259,10 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length).decode('utf-8'))
             if not isinstance(data, dict):
                 raise ValueError('Se requiere un objeto JSON.')
-            if path == '/api/memories/delete':
+            if path == '/api/model':
+                status, result = self.server.app.change_model(data)
+                self.json(status, result)
+            elif path == '/api/memories/delete':
                 if set(data) != {'id'}:
                     raise ValueError('Se requiere solo id.')
                 if not self.server.app.lock.acquire(blocking=False):
@@ -202,10 +283,12 @@ class Handler(BaseHTTPRequestHandler):
             self.json(400, {'error': 'Datos de peticion invalidos.'})
         except (CompanionError, requests.RequestException, sqlite3.Error):
             self.json(502, {'error': 'No se pudo completar la consulta. Las memorias ya guardadas se conservan; revisa conexion y permisos.'})
+        except OSError:
+            self.json(500, {'error': 'No se pudo guardar la configuracion local.'})
 
 
-def create_server(monitor, model, port=8765, router=None, answer_fn=None):
-    app = AppState(monitor, model, router, answer_fn)
+def create_server(monitor, model, port=8765, router=None, answer_fn=None, models_fn=None, save_settings_fn=None):
+    app = AppState(monitor, model, router, answer_fn, models_fn, save_settings_fn)
     try:
         return LocalServer(port, app)
     except OSError as exc:

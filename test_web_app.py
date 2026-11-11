@@ -22,7 +22,10 @@ class WebTests(unittest.TestCase):
         self.monitor._pending = False
         self.monitor._error = None
         self.answer = Mock(side_effect=self.reply)
-        self.server = web_app.create_server(self.monitor, 'test-model', 0, answer_fn=self.answer)
+        self.models = Mock(return_value=[{'slug': 'test-model', 'display_name': 'Test'}, {'slug': 'other'}])
+        self.save_settings = Mock()
+        self.server = web_app.create_server(self.monitor, 'test-model', 0, answer_fn=self.answer,
+                                            models_fn=self.models, save_settings_fn=self.save_settings)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.http = requests.Session()
@@ -187,6 +190,184 @@ class WebTests(unittest.TestCase):
         with web_app.create_server(self.monitor, 'test', self.server.server_port) as other:
             self.assertNotEqual(other.server_port, self.server.server_port)
             self.assertEqual(other.server_address[0], '127.0.0.1')
+
+    def test_bank_search_is_filtered_in_ram_without_inference(self):
+        with patch.object(Path, 'open', side_effect=AssertionError('No disk reads')):
+            result = self.http.get(self.base + '/api/bank', params={'q': '  TEST ORE  '}, timeout=5)
+            self.assertEqual(result.status_code, 200)
+            data = result.json()
+            self.assertEqual(data['bank']['total_matches'], 800)
+            self.assertEqual(data['bank']['bank_total_items'], 802)
+            self.assertEqual(len(data['bank']['items']), 30)
+            self.assertEqual(data['inventory'], [])
+            self.assertIn('currency', data)
+            result = self.http.get(self.base + '/api/bank?q=fire', timeout=5).json()
+            self.assertEqual(result['inventory'][0]['name'], 'Fire rune')
+            self.assertEqual(result['bank']['total_matches'], 0)
+        for query in ('x' * 101, 'bad\x00query'):
+            self.assertEqual(self.http.get(self.base + '/api/bank', params={'q': query}, timeout=5).status_code, 400)
+        empty = self.http.get(self.base + '/api/bank', timeout=5).json()
+        self.assertNotIn('items', empty['bank'])
+        self.answer.assert_not_called()
+        self.models.assert_not_called()
+
+    def test_model_catalog_is_cached_and_change_is_persisted_for_next_chat(self):
+        for _ in range(2):
+            data = self.http.get(self.base + '/api/models', timeout=5).json()
+            self.assertEqual(data, {'current': 'test-model', 'models': [
+                {'slug': 'test-model', 'display_name': 'Test'}, {'slug': 'other', 'display_name': 'other'}]})
+        self.models.assert_called_once_with()
+        self.assertEqual(self.post('/api/model', {'model': 'other'}).json(), {'ok': True, 'model': 'other'})
+        self.save_settings.assert_called_once_with(model='other')
+        self.assertEqual(self.http.get(self.base + '/api/models', timeout=5).json()['current'], 'other')
+        self.post('/api/chat', {'message': 'hello'})
+        self.assertEqual(self.answer.call_args.args[1], 'other')
+
+    def test_model_mutation_validation_csrf_origin_and_busy(self):
+        for data in ({'model': 'missing'}, {'model': None}, {'model': []}, {}, {'model': 'other', 'extra': 1}):
+            self.assertEqual(self.post('/api/model', data).status_code, 400)
+        self.assertEqual(self.http.post(self.base + '/api/model', json={'model': 'other'}, timeout=5).status_code, 403)
+        self.assertEqual(self.post('/api/model', {'model': 'other'}, Origin='https://external.example').status_code, 403)
+        self.server.app.lock.acquire()
+        try:
+            self.assertEqual(self.post('/api/model', {'model': 'other'}).status_code, 409)
+        finally:
+            self.server.app.lock.release()
+        self.assertEqual(self.server.app.model, 'test-model')
+        self.save_settings.assert_not_called()
+        self.answer.assert_not_called()
+
+    def test_model_catalog_offline_retries_and_persistence_failure_is_atomic(self):
+        self.models.side_effect = web_app.CompanionError('secret')
+        response = self.http.get(self.base + '/api/models', timeout=5)
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn('secret', response.text)
+        self.models.side_effect = None
+        self.save_settings.side_effect = OSError('private path')
+        response = self.post('/api/model', {'model': 'other'})
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn('private path', response.text)
+        self.assertEqual(self.server.app.model, 'test-model')
+        self.assertFalse(self.server.app.lock.locked())
+
+    def test_new_controls_and_security_policy_are_served(self):
+        response = self.http.get(self.base, timeout=5)
+        for name in ('bank-search', 'bank-results', 'model-select'):
+            self.assertIn(f'id="{name}"', response.text)
+        self.assertIn("script-src 'self'", response.headers['Content-Security-Policy'])
+        self.assertNotIn('unsafe-inline', response.headers['Content-Security-Policy'])
+
+    def test_progress_filters_quests_diaries_and_combat_in_ram_without_model(self):
+        self.monitor._state['combatAchievements'] = {'tasks': [
+            {'name': f'Example challenge {i}', 'tier': 'EASY', 'monster': 'Example boss', 'completed': i % 2 == 0}
+            for i in range(60)]}
+        with patch.object(Path, 'open', side_effect=AssertionError('No disk per query')):
+            def search(**params):
+                result = self.http.get(self.base + '/api/progress', params=params, timeout=5)
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.headers['Cache-Control'], 'no-store')
+                return result.json()
+            quests = search(q='  quest 1  ', category='quests', status='completed')
+            self.assertTrue(quests['quests'])
+            self.assertTrue(all('quest 1' in q['displayName'].lower() and q['state'] == 'FINISHED' for q in quests['quests']))
+            self.assertNotIn('achievementDiaries', quests)
+            diaries = search(q='ardougne', category='diaries', status='incomplete')['achievementDiaries']
+            self.assertEqual(set(diaries), {'ARDOUGNE'})
+            self.assertEqual(diaries['ARDOUGNE']['total_matches'], 40)
+            self.assertEqual(len(diaries['ARDOUGNE']['tasks']), 30)
+            self.assertTrue(all(task['completed'] is False for task in diaries['ARDOUGNE']['tasks']))
+            combat = search(q='example boss', category='combat_achievements', status='completed')['combatAchievements']
+            self.assertEqual(combat['total_matches'], 30)
+            self.assertEqual(len(combat['tasks']), 25)
+            self.assertTrue(combat['truncated'])
+            self.assertTrue(all(task['completed'] for task in combat['tasks']))
+        self.assertEqual(self.server.app.history, [])
+        self.answer.assert_not_called()
+        self.models.assert_not_called()
+
+    def test_progress_invalid_filters_are_400_before_querying_monitor(self):
+        with patch.object(self.monitor, 'query_quests_diaries', wraps=self.monitor.query_quests_diaries) as query:
+            for params in ({'category': 'invalid'}, {'status': 'invalid'}, {'q': 'x' * 101},
+                           {'q': 'bad\x00term'}, {'category': ''}, {'status': ''}):
+                response = self.http.get(self.base + '/api/progress', params=params, timeout=5)
+                self.assertEqual(response.status_code, 400, params)
+                self.assertIn('Filtro de progreso', response.json()['error'])
+            for value in (None, True, [], 42):
+                with self.assertRaises(web_app.ApiError):
+                    self.server.app.progress_payload(value)
+            query.assert_not_called()
+        self.assertEqual(self.http.get(self.base + '/api/progress', params={'q': 'x' * 100}, timeout=5).status_code, 200)
+        self.answer.assert_not_called()
+
+    def test_progress_defaults_remain_available_while_chat_locked_and_hide_stale_data(self):
+        self.server.app.lock.acquire()
+        try:
+            response = self.http.get(self.base + '/api/progress?q=', timeout=5)
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data['total_matches'], 150)
+            self.assertEqual(len(data['quests']), 40)
+            self.assertTrue(data['truncated'])
+            self.assertIn('achievementDiaries', data)
+            self.monitor._pending = True
+            unavailable = self.http.get(self.base + '/api/progress?q=quest', timeout=5).json()
+            self.assertFalse(unavailable['ok'])
+            self.assertNotIn('quests', unavailable)
+            self.assertNotIn('achievementDiaries', unavailable)
+        finally:
+            self.server.app.lock.release()
+        self.answer.assert_not_called()
+        self.assertEqual(self.server.app.history, [])
+
+    def test_progress_preserves_http_guards_and_serves_accessible_controls(self):
+        for headers in ({'Host': 'rebind.example'}, {'Origin': 'https://external.example'}, {'Sec-Fetch-Site': 'cross-site'}):
+            self.assertEqual(self.http.get(self.base + '/api/progress?q=quest', headers=headers, timeout=5).status_code, 403)
+        response = self.http.get(self.base, timeout=5)
+        for name in ('diary-progress', 'progress-search', 'progress-category', 'progress-status', 'progress-results'):
+            self.assertIn(f'id="{name}"', response.text)
+        self.assertIn("connect-src 'self'", response.headers['Content-Security-Policy'])
+        self.answer.assert_not_called()
+
+    def test_retro_theme_csp_allows_only_requested_font_and_image_sources(self):
+        response = self.http.get(self.base, timeout=5)
+        policy = response.headers['Content-Security-Policy']
+        for directive in ("default-src 'self'", "script-src 'self'", "connect-src 'self'",
+                          "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'",
+                          "style-src 'self' https://fonts.googleapis.com",
+                          "font-src 'self' data: https://fonts.gstatic.com", "img-src 'self' data:"):
+            self.assertIn(directive, policy)
+        self.assertNotIn('unsafe-inline', policy)
+        self.assertNotIn('unsafe-eval', policy)
+        for font in ('Pixelify+Sans', 'Chakra+Petch', 'Plus+Jakarta+Sans'):
+            self.assertIn(font, response.text)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+
+    def test_quick_filters_and_search_precede_progress_breakdown_and_equipment(self):
+        html = self.http.get(self.base, timeout=5).text
+        for category, status in (('quests', 'in_progress'), ('quests', 'incomplete'),
+                                 ('quests', 'completed'), ('diaries', 'incomplete')):
+            self.assertIn(f'data-progress-cat="{category}" data-progress-status="{status}"', html)
+        self.assertLess(html.index('id="progress-search"'), html.index('id="diary-progress"'))
+        self.assertLess(html.index('id="progress-results"'), html.index('id="combat-progress"'))
+        self.assertLess(html.index('id="progress-search"'), html.index('id="equipment"'))
+        ids = ('connection','live-freshness','player-name','player-meta','quest-points','gold',
+               'tab-state','tab-gear','tab-memory','memory-count','state-content','gear-content',
+               'memory-content','skills','patch-count','farming','birdhouses','bank-search',
+               'bank-results','equipment','ge-offers','slayer','kill-counts','quest-progress',
+               'diary-progress','combat-progress','progress-search','progress-category',
+               'progress-status','progress-results','memories','state-path','model-label',
+               'model-select','clear','conversation','welcome','error','chat-form','message','send')
+        for name in ids:
+            self.assertEqual(html.count(f'id="{name}"'), 1, name)
+        self.answer.assert_not_called()
+
+    def test_denied_posts_return_complete_403_without_mutation_or_connection_reset(self):
+        for _ in range(12):
+            response = self.post('/api/chat', {'message': 'Denied example'}, **{'X-CSRF-Token':'wrong'})
+            self.assertEqual(response.status_code, 403)
+            self.assertIn('error', response.json())
+        self.answer.assert_not_called()
+        self.assertEqual(self.server.app.history, [])
 
 
 if __name__ == '__main__':
