@@ -1,5 +1,58 @@
 # Historial de cambios
 
+## 0.7.0 — 2026-11-11
+
+### Añadido
+
+- Frontend principal modular en React 19, TypeScript, Vite y Tailwind v4, con componentes shadcn/ui obtenidos mediante la CLI oficial, Radix UI y Vaul. Dependencias reales y lockfile reproducible.
+- Barra superior con perfil, modelo y accesos; navegación inferior Chat/Personaje/Progreso/Oráculo/Notas en ventanas estrechas y layout dividido desde 1024 px.
+- Banco modal, bloques secundarios plegables, Markdown seguro y conservación de formularios al navegar; 39 sprites SVG conservados.
+- HTML inicial prerenderizado e hidratación React, manteniendo IDs semánticos y compatibilidad de las rutas `/app.js` y `/app.css`.
+- Servicio de assets con resolución estricta dentro de `frontend/dist/`, extensiones/MIME permitidos y la misma CSP/CSRF/origen. Fallback legacy cuando no hay build completo.
+- Assets compilados incluidos al construir una wheel; Node se necesita para desarrollo y compilación, no para usar el bundle empaquetado.
+- Plantilla MCP local ignorada por Git y documentación de su activación. No había conexión MCP disponible: se utilizó la CLI oficial.
+- Ocho pruebas React, tres pruebas Python de assets/seguridad/fallback, conservando 33 casos DOM legacy: 87 pruebas Python en total.
+- Verificación visual en escritorio y ventana estrecha con datos ficticios; regresión del chat cubierta por prueba y navegador.
+
+### Conservado / pendiente
+
+- Los siete módulos protegidos y el protocolo SIWC permanecen intactos; sin cambios de endpoints de inferencia ni de credenciales.
+- Ventana nativa pywebview y Always-on-Top pendientes para Fase 7B.
+- README en tres idiomas y exportación local del código sincronizados.
+
+## 0.6.0 — 2026-11-11
+
+### Añadido
+
+- Etapas y contadores de Farming/Birdhouses actualizados cada segundo a partir de `readyAt`; tarjetas verdes al vencer, conservando `DEAD` y sin inventar fechas ausentes.
+- Panel Dailies con entradas desbloqueadas, progreso exportado y estado pendiente/reclamado, sin deducir resets de calendario.
+- Creación manual de notas SQLite por `POST /api/memories`, con CSRF, validación, detección de duplicados y bloqueo 409 durante el chat.
+- Búsqueda FTS5 por `GET /api/memories?q=...`, debounce de 180 ms, descarte de respuestas atrasadas y conservación de borradores ante errores.
+- Oráculo directo GE/Wiki mediante `/api/ge` y `/api/wiki`, clientes inyectables, precios con antigüedad y campos ausentes, extractos y enlaces restringidos al dominio HTTPS de OSRS Wiki.
+- Cinco pruebas Python y siete casos DOM nuevos: 84 pruebas Python y 33 casos DOM en total. Comprobación visual con datos ficticios y base SQLite temporal.
+- README sincronizados en tres idiomas y exportación local del código actualizada.
+
+### Conservado
+
+- Las funciones nuevas no llaman al modelo ni modifican el historial; GE/Wiki sí requieren las APIs públicas existentes.
+- `auth.py`, `state_monitor.py`, `tools.py`, `wiki_client.py`, `memory_db.py`, `inference.py` y `launcher.py` intactos.
+- Los 41 IDs previos conservan su orden relativo; CSP, loopback, Host/Origin, Sec-Fetch-Site, CSRF y protocolo SIWC conservados.
+
+## 0.5.1 — 2026-11-11
+
+### Cambiado
+
+- Identidad visible de la interfaz a RuneScribe, con título OSRS HUD & Wiki y textos funcionales para consultas, notas, objetivos y estado.
+- Retirados eslóganes, etiquetas promocionales y estilos de las etiquetas eliminadas; conservados iconos, tema y controles.
+- Modelo activo como `Modelo: <slug>`, indicador `Preparando respuesta…` y badge de búsqueda `LOCAL`.
+- README sincronizados en tres idiomas y exportación local del código actualizada; paquete, comandos y repositorio conservan sus nombres.
+- Prueba contra la reintroducción de los eslóganes; 79 pruebas Python y 26 casos DOM.
+
+### Conservado
+
+- Los ocho módulos protegidos (`auth.py`, `state_monitor.py`, `tools.py`, `wiki_client.py`, `memory_db.py`, `inference.py`, `launcher.py`, `web_app.py`) intactos.
+- IDs, atributos data-*, roles ARIA, herramientas, autenticación y protocolo SIWC sin cambios.
+
 ## 0.5.0 — 2026-11-10
 
 ### Añadido

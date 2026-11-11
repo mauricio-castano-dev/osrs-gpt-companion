@@ -1,10 +1,10 @@
 <div align="center">
 
-# ⚔️ OSRS GPT Companion
+# ⚔️ RuneScribe
 
 [Español](README.md) · **English** · [Português (Brasil)](README.pt-BR.md)
 
-**Your character, your goals, and an agent that remembers how you like to play.**
+**Local OSRS HUD, Wiki queries, and goal tracking.**
 
 A Python assistant for **Old School RuneScape**, with an OSRS-style local interface and console, using character data
 exported by RuneLite's **Character Snapshot** plugin, local memory, and tools
@@ -52,6 +52,7 @@ and the agent's current default language remain Spanish.
 ### Requirements
 
 - Windows and Python **3.11 or later**.
+- Node.js **24** and npm to build the frontend from source; not needed to run a wheel containing the bundle.
 - Git to clone the project.
 - An eligible ChatGPT account with permission to use its plan through SIWC.
 - RuneLite with **Character Snapshot** installed and enabled. This repository does not install the plugin.
@@ -66,6 +67,10 @@ git clone https://github.com/mauricio-castano-dev/osrs-gpt-companion.git
 Set-Location osrs-gpt-companion
 
 python -m venv .venv
+Push-Location frontend
+npm ci
+npm run build
+Pop-Location
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe main.py --install-path
 ```
@@ -283,7 +288,10 @@ external CORS. Do not expose this desktop interface through port forwarding.
 | Local endpoint | Action |
 | --- | --- |
 | `GET /api/status` | Filtered RAM state, model, path, and relative age; no inference. |
-| `GET /api/memories` | Latest 30 local memories. |
+| `GET /api/memories` | Latest 30 notes; `?q=...` returns up to eight FTS5 matches. |
+| `POST /api/memories` | Save `{ "tema": "...", "contenido": "..." }`, with CSRF. |
+| `GET /api/ge?q=...` | Direct GE prices, no model call. |
+| `GET /api/wiki?q=...` | Wiki extract and links, no model call. |
 | `POST /api/memories/delete` | Delete `{ "id": 3 }`, with a CSRF token. |
 | `POST /api/chat` | Send `{ "message": "..." }`; receive the reply, used tools, and report age. |
 
@@ -295,7 +303,7 @@ token is separate and exists only for the local server session.
 
 ### Equipment, progress, and live tools
 
-The HUD has three tabs: **Habilidades & Runs**, **Equipo & Progreso**, and
+On desktop, the HUD has three tabs: **Habilidades & Runs**, **Equipo & Progreso**, and
 **Memorias**. The progress tab shows occupied equipment slots, personal GE offers
 with quantities/prices, Slayer master/task/streak/points, quest counts, Combat
 Achievement tiers, and highlighted KC. Missing data is reported without invented
@@ -392,6 +400,102 @@ CSP allows only Google Fonts for external styles/fonts and `data:` sprites,
 retaining `script-src 'self'`, `connect-src 'self'`, and no `unsafe-inline`.
 Icons use spans/pseudo-elements; names remain safe text rather than HTML.
 
+### RuneScribe (0.5.1)
+
+The interface is branded **RuneScribe · OSRS HUD & Wiki**, with functional labels
+for queries, notes, goals, and status. The active model appears as `Modelo: <slug>`.
+The installation, repository, and `osrs-companion` / `osrs-companion-ui` commands
+keep their current names. This release changes copy and presentation, leaving
+authentication, APIs, tools, persistence, and Character Snapshot formats unchanged.
+
+### Timers, dailies, notes, and direct queries (0.6.0)
+
+**Habilidades & Runs** displays exported stages (`stage/stages`) and updates a
+countdown each second when `readyAt` is a valid date string. Expiry turns the card
+green with «Listo para recoger», even if the report still says `GROWING`; `DEAD`
+keeps its state without a countdown. Without a valid date, only available state
+and stages appear. This is an estimate based on the report and local clock,
+not a live game query or a time inferred from stages. **Dailies** includes only
+`unlocked: true` entries, distinguishes pending/claimed, and shows `claimedCount / max`
+when available. It does not calculate calendar resets: updates come from the next
+Character Snapshot export.
+
+In **Memorias**, create notes with a topic up to 200 characters and content up
+to 8000. `POST /api/memories` saves to SQLite, rejects empty/null text, and avoids
+exact duplicates. CSRF is required; ongoing chat turns cause a 409 response.
+`GET /api/memories?q=...` accepts up to 300 characters and uses token-based FTS5
+(AND with OR fallback), returning at most eight matches. No filter shows the
+latest 30 notes. Typing uses a 180 ms debounce; stale responses are discarded.
+Drafts survive save failures. Manual save/search/delete actions neither invoke
+the model nor change chat history. Agent tools can still recall saved notes.
+
+**Equipo & Progreso → Oráculo GE & Wiki** directly calls `GET /api/ge?q=...`
+or `GET /api/wiki?q=...`, accepting 1–100 characters. These use the existing
+client's public OSRS Wiki APIs without sending a model turn. Prices include
+observed instant buy/sell values, observation age, four-hour limits, and High Alch
+when available; missing values appear as «—». They are not guaranteed offers.
+Wiki results show a text extract and HTTPS links restricted to the exact OSRS Wiki
+domain. Network access is required; external failures return a sanitized 502.
+The browser contacts only the loopback server, keeping `connect-src 'self'`.
+
+### Modular React interface and Sidekick layout (0.7.0)
+
+The main interface lives in `frontend/src/`: React 19, strict TypeScript, Vite,
+Tailwind v4, and shadcn/ui components generated with the official CLI, using
+Radix UI and Vaul. It retains 39 SVG sprites in `styles/sprites.css` and separates
+API, types, hooks, layout, chat, character, progress, oracle, and notes.
+
+Windows narrower than 1024 px show five bottom navigation destinations: **Chat**,
+**Personaje**, **Progreso**, **Oráculo**, and **Notas**. Desktop keeps three tabs
+in the left panel and chat on the right. Bank search opens as a modal drawer;
+gear, offers, Slayer, diaries, and tiers are collapsible. The top menu opens bank,
+oracle, and notes and shows the connected file. Model selection and chat reset
+keep their existing API contracts. This is not a remote mobile app: the server
+remains restricted to the local computer.
+
+`npm run build` checks TypeScript, bundles to `frontend/dist/`, and prerenders
+the initial HTML with React. The browser hydrates it and keeps form state across
+navigation. Vaul activates after hydration. Chat renders safe Markdown without
+raw HTML or images. Queries cancel previous requests; status polls every 3 s or
+600 ms during chat. Browser fallback remains partial, not a complete catalog.
+
+Python serves `/assets/*.js`, `.css`, and `.svg` only after resolving paths and
+verifying containment in `frontend/dist/`. Safe MIME, CSP, CSRF, origin checks,
+and `no-store` remain. `/app.js`, `/app.css`, and `ui/` retain legacy compatibility
+and its 33 DOM tests. Without a complete build, the legacy interface is used.
+A wheel created after building includes compiled assets, so end users do not
+need Node. When installing from a clone, build the frontend first.
+
+Development keeps the Python origin and CSP:
+
+```powershell
+Push-Location frontend
+npm ci
+npm run build
+npm test
+# Optional: rebuild and prerender on source changes
+npm run dev
+Pop-Location
+```
+
+`npm run dev` watches and rebuilds; continue opening the Python loopback address.
+It does not start a Vite HMR API server or change origin checks. Reload the page
+after rebuilding.
+
+Local `.mcp.json` (Git-ignored) contains:
+
+```json
+{"mcpServers":{"shadcn":{"command":"npx","args":["shadcn@latest","mcp"]}}}
+```
+
+Enable it in a compatible MCP client; RuneScribe does not require it at runtime.
+This implementation used the CLI because no shadcn MCP connection was available.
+Aliases live in `components.json` and `tsconfig.json`. References:
+[official MCP](https://ui.shadcn.com/docs/mcp),
+[shadcn with Vite](https://ui.shadcn.com/docs/installation/vite).
+
+Native `pywebview` windows and Always-on-Top remain pending for Phase 7B.
+
 ## 🗂 Project structure
 
 ```text
@@ -400,7 +504,11 @@ osrs-gpt-companion/
 ├── web_app.py           # Loopback API + CSRF
 ├── launcher.py          # Windows PATH
 ├── pyproject.toml       # Console entry points
-├── ui/                  # HTML / CSS / JS
+├── frontend/            # React + TypeScript + Vite + shadcn/ui
+│   ├── src/             # API, types, components, features, styles
+│   ├── package-lock.json
+│   └── dist/            # Production bundle (generated)
+├── ui/                  # Legacy compatibility HTML / CSS / JS
 ├── test_frontend.py     # Optional JS rendering tests
 ├── tests/ui.test.cjs     # Synthetic DOM, no browser
 ├── test_web_app.py      # Local API tests
@@ -461,9 +569,11 @@ The client accepts connections that omit `Content-Type` if the body contains
 valid SSE events. It rejects malformed events and responses without completion
 confirmation; incomplete tool calls are not executed.
 
-Optionally, Node.js runs twenty-five additional rendering tests with a synthetic DOM.
-It is not required to install, build, or use the application. When available,
-`python -m unittest -v` also runs this check.
+Node is required to build the frontend from source. `npm test` inside
+`frontend/` runs eight React tests with Vitest and a simulated DOM. The 33 legacy
+DOM tests remain in `tests/ui.test.cjs` and are also invoked by Python when Node
+is available. The Python suite has 87 tests; its bundle check requires running
+`npm run build` first.
 
 ## 📌 Current scope
 

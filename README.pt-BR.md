@@ -1,10 +1,10 @@
 <div align="center">
 
-# ⚔️ OSRS GPT Companion
+# ⚔️ RuneScribe
 
 [Español](README.md) · [English](README.en.md) · **Português (Brasil)**
 
-**Seu personagem, seus objetivos e um agente que lembra como você gosta de jogar.**
+**HUD local de OSRS, consultas à Wiki e acompanhamento de objetivos.**
 
 Um assistente para **Old School RuneScape**, com interface local no estilo OSRS e console, desenvolvido em Python,
 com dados exportados pelo plugin **Character Snapshot** do RuneLite, memória
@@ -52,6 +52,7 @@ o idioma padrão atual do agente continuam em espanhol.
 ### Requisitos
 
 - Windows e Python **3.11 ou posterior**.
+- Node.js **24** e npm para compilar o frontend a partir das fontes; dispensáveis para executar uma wheel com o bundle.
 - Git para clonar o projeto.
 - Uma conta elegível do ChatGPT com permissão para usar o plano por meio de SIWC.
 - RuneLite com o plugin **Character Snapshot** instalado e ativado. Este repositório não instala o plugin.
@@ -66,6 +67,10 @@ git clone https://github.com/mauricio-castano-dev/osrs-gpt-companion.git
 Set-Location osrs-gpt-companion
 
 python -m venv .venv
+Push-Location frontend
+npm ci
+npm run build
+Pop-Location
 .\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\python.exe main.py --install-path
 ```
@@ -287,7 +292,10 @@ interface de desktop por redirecionamento de portas.
 | Endpoint local | Ação |
 | --- | --- |
 | `GET /api/status` | Estado filtrado em RAM, modelo, caminho e tempo relativo; sem inferência. |
-| `GET /api/memories` | Últimas 30 memórias locais. |
+| `GET /api/memories` | Últimas 30 notas; com `?q=...`, até oito resultados FTS5. |
+| `POST /api/memories` | Salva `{ "tema": "...", "contenido": "..." }`, com CSRF. |
+| `GET /api/ge?q=...` | Preços GE diretos, sem modelo. |
+| `GET /api/wiki?q=...` | Extrato e links da Wiki, sem modelo. |
 | `POST /api/memories/delete` | Exclui `{ "id": 3 }`, com token CSRF. |
 | `POST /api/chat` | Envia `{ "message": "..." }`; recebe resposta, ferramentas e idade do reporte. |
 
@@ -299,7 +307,7 @@ o token CSRF é independente e existe apenas durante a sessão local do servidor
 
 ### Equipamento, progresso e ferramentas em tempo real
 
-O HUD tem três abas: **Habilidades & Runs**, **Equipo & Progreso** e **Memorias**.
+No desktop, o HUD tem três abas: **Habilidades & Runs**, **Equipo & Progreso** e **Memorias**.
 A aba de progresso mostra slots ocupados de equipamento, ofertas pessoais do GE
 com quantidades/preços, mestre/tarefa/sequência/pontos de Slayer, contagens de
 missões, níveis de Combat Achievements e KC destacados. Dados ausentes são
@@ -399,6 +407,104 @@ A CSP permite somente Google Fonts para estilos/fontes externos e sprites
 `data:`, mantendo `script-src 'self'`, `connect-src 'self'` e nenhum `unsafe-inline`.
 Os ícones usam spans/pseudoelementos; nomes continuam como texto seguro, nunca HTML.
 
+### RuneScribe (0.5.1)
+
+A interface se identifica como **RuneScribe · OSRS HUD & Wiki**, com rótulos
+funcionais para consultas, notas, objetivos e estado. O modelo ativo aparece
+como `Modelo: <slug>`. A instalação, o repositório e os comandos `osrs-companion`
+/ `osrs-companion-ui` mantêm seus nomes atuais. Esta revisão altera textos e
+apresentação, preservando autenticação, APIs, ferramentas, persistência e o formato
+do Character Snapshot.
+
+### Timers, dailies, notas e consultas diretas (0.6.0)
+
+**Habilidades & Runs** mostra as etapas exportadas (`stage/stages`) e atualiza
+a contagem regressiva a cada segundo quando `readyAt` é uma data de texto válida.
+Ao vencer, a ficha fica verde com «Listo para recoger», mesmo se o reporte ainda
+indicar `GROWING`; `DEAD` mantém o estado sem contador. Sem data válida, aparecem
+somente estado e etapas disponíveis. O contador é uma estimativa baseada no reporte
+e relógio local; não consulta o jogo nem calcula horário a partir das etapas.
+**Dailies** inclui somente entradas com `unlocked: true`, distingue pendente/reclamado
+e mostra `claimedCount / max` quando disponível. Não calcula resets pelo calendário:
+depende da próxima exportação do Character Snapshot.
+
+Em **Memorias**, crie notas com tema de até 200 caracteres e conteúdo de até 8000.
+`POST /api/memories` salva no SQLite, rejeita texto vazio/nulo e evita duplicatas
+exatas. Exige CSRF; durante um turno de chat retorna 409. O filtro usa
+`GET /api/memories?q=...`, até 300 caracteres, FTS5 por tokens (AND com alternativa
+OR), retornando até oito correspondências. Sem filtro, mostra as últimas 30 notas.
+A digitação aguarda 180 ms e respostas atrasadas são descartadas. Rascunhos são
+preservados se o salvamento falhar. Salvar, buscar e excluir manualmente não
+chama o modelo nem altera o histórico. As ferramentas do agente continuam podendo
+recuperar as notas salvas.
+
+**Equipo & Progreso → Oráculo GE & Wiki** consulta diretamente `GET /api/ge?q=...`
+ou `GET /api/wiki?q=...` com texto de 1 a 100 caracteres. Usa as APIs públicas da
+OSRS Wiki pelo cliente existente, sem enviar turno ao modelo. Preços incluem
+compra/venda instantânea observada, idade, limite de 4 h e High Alch quando
+disponíveis; campos ausentes aparecem como «—». Não são ofertas garantidas.
+A Wiki mostra extrato de texto e links HTTPS restritos ao domínio exato da OSRS Wiki.
+É necessária conexão; erros externos retornam 502 sem detalhes internos.
+O navegador consulta apenas o servidor loopback, mantendo `connect-src 'self'`.
+
+### Interface React modular e layout Sidekick (0.7.0)
+
+A interface principal fica em `frontend/src/`: React 19, TypeScript estrito,
+Vite, Tailwind v4 e componentes shadcn/ui gerados com a CLI oficial, usando Radix
+UI e Vaul. Preserva 39 sprites SVG em `styles/sprites.css` e separa API, tipos,
+hooks, layout, chat, personagem, progresso, oráculo e notas.
+
+Janelas com menos de 1024 px mostram cinco acessos inferiores: **Chat**,
+**Personaje**, **Progreso**, **Oráculo** e **Notas**. No desktop permanecem três
+abas à esquerda e chat à direita. O banco abre em drawer modal; equipamento,
+ofertas, Slayer, diários e tiers são recolhíveis. O menu superior abre banco,
+oráculo e notas e mostra o arquivo conectado. Modelo e limpeza do chat mantêm
+os contratos de API. Não é um aplicativo móvel remoto: o servidor continua
+restrito ao computador local.
+
+`npm run build` verifica TypeScript, compila em `frontend/dist/` e pré-renderiza
+o HTML inicial com React. O navegador hidrata esse HTML e preserva formulários
+ao navegar. Vaul é ativado após a hidratação. O chat usa Markdown seguro, sem HTML
+cru nem imagens. Consultas cancelam solicitações anteriores; o estado atualiza a
+cada 3 s ou 600 ms durante o chat. O respaldo do navegador continua parcial.
+
+Python serve `/assets/*.js`, `.css` e `.svg` somente após resolver os caminhos
+e verificar que ficam dentro de `frontend/dist/`. MIME seguro, CSP, CSRF, origem
+e `no-store` permanecem. `/app.js`, `/app.css` e `ui/` mantêm compatibilidade e
+os 33 testes DOM antigos. Sem build completo, a interface anterior é usada.
+Uma wheel criada após o build inclui assets compilados e dispensa Node para uso.
+Ao instalar de um clone, compile o frontend antes.
+
+Desenvolvimento preservando a origem Python e CSP:
+
+```powershell
+Push-Location frontend
+npm ci
+npm run build
+npm test
+# Opcional: recompilar e pré-renderizar ao salvar arquivos
+npm run dev
+Pop-Location
+```
+
+`npm run dev` observa e recompila; continue abrindo o endereço loopback do Python.
+Não inicia servidor Vite HMR para a API nem altera verificações de origem.
+Recarregue a página após o build.
+
+O `.mcp.json` local (ignorado pelo Git) contém:
+
+```json
+{"mcpServers":{"shadcn":{"command":"npx","args":["shadcn@latest","mcp"]}}}
+```
+
+Ative em um cliente MCP compatível; não é necessário para executar RuneScribe.
+Foi usada a CLI porque não havia conexão MCP de shadcn disponível. Aliases ficam
+em `components.json` e `tsconfig.json`. Referências:
+[MCP oficial](https://ui.shadcn.com/docs/mcp),
+[shadcn com Vite](https://ui.shadcn.com/docs/installation/vite).
+
+Janela nativa `pywebview` e Always-on-Top continuam pendentes para a Fase 7B.
+
 ## 🗂 Estrutura do projeto
 
 ```text
@@ -407,7 +513,11 @@ osrs-gpt-companion/
 ├── web_app.py           # Loopback API + CSRF
 ├── launcher.py          # Windows PATH
 ├── pyproject.toml       # Console entry points
-├── ui/                  # HTML / CSS / JS
+├── frontend/            # React + TypeScript + Vite + shadcn/ui
+│   ├── src/             # API, types, components, features, styles
+│   ├── package-lock.json
+│   └── dist/            # Production bundle (generated)
+├── ui/                  # Legacy compatibility HTML / CSS / JS
 ├── test_frontend.py     # Optional JS rendering tests
 ├── tests/ui.test.cjs     # Synthetic DOM, no browser
 ├── test_web_app.py      # Local API tests
@@ -469,9 +579,11 @@ O cliente aceita conexões que omitem `Content-Type` quando o corpo contém even
 SSE válidos. Rejeita eventos malformados e respostas sem confirmação de conclusão;
 chamadas incompletas de ferramentas não são executadas.
 
-Opcionalmente, Node.js executa vinte e cinco testes adicionais de renderização com um DOM
-sintético. Não é necessário para instalar, compilar ou usar o aplicativo. Quando
-disponível, `python -m unittest -v` também executa essa verificação.
+Node é necessário para compilar o frontend a partir das fontes. `npm test`
+em `frontend/` executa oito testes React com Vitest e DOM simulado. Os 33 testes
+DOM antigos permanecem em `tests/ui.test.cjs` e também são chamados por Python
+quando Node está disponível. A suíte Python tem 87 testes; a verificação do
+bundle exige executar `npm run build` antes.
 
 ## 📌 Alcance atual
 

@@ -8,16 +8,20 @@ import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
 from auth import CompanionError
 from inference import answer, list_models
-from memory_db import list_memories, delete_memory
+from memory_db import list_memories, delete_memory, save_memory, search_memory
 from state_monitor import format_relative_time
 from tools import ToolRouter
+from wiki_client import WikiError, check_ge_price, search_osrs_wiki
 
 UI_ROOT = Path(__file__).resolve().parent / 'ui'
+DIST_ROOT = Path(__file__).resolve().parent / 'frontend' / 'dist'
+ASSET_TYPES = {'.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+               '.svg': 'image/svg+xml'}
 
 
 class ApiError(ValueError):
@@ -36,7 +40,8 @@ def allowed_request(client, host, origin, fetch_site, expected):
 
 
 class AppState:
-    def __init__(self, monitor, model, router=None, answer_fn=None, models_fn=None, save_settings_fn=None):
+    def __init__(self, monitor, model, router=None, answer_fn=None, models_fn=None, save_settings_fn=None,
+                 ge_fn=None, wiki_fn=None):
         # Importacion diferida: main carga web_app solo al iniciar la interfaz.
         if save_settings_fn is None:
             from main import save_settings
@@ -47,6 +52,8 @@ class AppState:
         self.answer = answer_fn or answer
         self.models_fn = models_fn or list_models
         self.save_settings_fn = save_settings_fn
+        self.ge_fn = ge_fn or check_ge_price
+        self.wiki_fn = wiki_fn or search_osrs_wiki
         self.available_models = None
         self.models_lock = threading.Lock()
         self.history = []
@@ -91,6 +98,16 @@ class AppState:
                 or status not in ('all', 'completed', 'incomplete', 'in_progress')):
             raise ApiError(400, 'Filtro de progreso inválido: hasta 100 caracteres, categoría y estado válidos.')
         return self.monitor.query_quests_diaries(query.strip(), category, status)
+
+    def ge_payload(self, query=''):
+        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 100 or '\x00' in query:
+            raise ApiError(400, 'Indica un objeto de 1 a 100 caracteres.')
+        return self.ge_fn(query.strip())
+
+    def wiki_payload(self, query=''):
+        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 100 or '\x00' in query:
+            raise ApiError(400, 'Indica una búsqueda de 1 a 100 caracteres.')
+        return self.wiki_fn(query.strip())
 
     def status(self):
         with self.tools_lock:
@@ -215,11 +232,34 @@ class Handler(BaseHTTPRequestHandler):
                 models = self.server.app.get_models()
                 self.json(200, {'current': self.server.app.model, 'models': models})
             elif path == '/api/memories':
-                self.json(200, {'memories': list_memories(limit=30)})
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('q', [''])[0].strip()
+                if len(q) > 300 or '\x00' in q:
+                    raise ApiError(400, 'Búsqueda de notas inválida.')
+                self.json(200, {'memories': search_memory(q) if q else list_memories(limit=30)})
+            elif path == '/api/ge':
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('q', [''])[0]
+                self.json(200, self.server.app.ge_payload(q))
+            elif path == '/api/wiki':
+                q = parse_qs(urlsplit(self.path).query, keep_blank_values=True).get('q', [''])[0]
+                self.json(200, self.server.app.wiki_payload(q))
+            elif path.startswith('/assets/'):
+                decoded = unquote(path)
+                if '\x00' in decoded:
+                    self.json(404, {'error': 'Asset no disponible.'})
+                    return
+                candidate = (DIST_ROOT / decoded.lstrip('/')).resolve()
+                if (not candidate.is_relative_to(DIST_ROOT.resolve())
+                        or candidate.suffix not in ASSET_TYPES or not candidate.is_file()):
+                    self.json(404, {'error': 'Asset no disponible.'})
+                    return
+                self.send_body(200, candidate.read_bytes(), ASSET_TYPES[candidate.suffix])
             elif path in ('/', '/app.css', '/app.js'):
                 name, kind = {'/': ('index.html', 'text/html'), '/app.css': ('app.css', 'text/css'),
                               '/app.js': ('app.js', 'text/javascript')}[path]
-                data = (UI_ROOT / name).read_text(encoding='utf-8')
+                source = DIST_ROOT / name if path == '/' and (DIST_ROOT / name).is_file() else UI_ROOT / name
+                data = source.read_text(encoding='utf-8')
+                if path == '/' and '@@APP@@' in data:
+                    data = (UI_ROOT / 'index.html').read_text(encoding='utf-8')
                 if path == '/':
                     data = data.replace('@@CSRF@@', self.server.app.csrf)
                 self.send_body(200, data.encode('utf-8'), kind + '; charset=utf-8')
@@ -227,6 +267,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json(404, {'error': 'Ruta no disponible.'})
         except ApiError as exc:
             self.json(exc.status, {'error': str(exc)})
+        except WikiError:
+            self.json(502, {'error': 'No se pudo consultar OSRS Wiki.'})
         except (CompanionError, requests.RequestException):
             self.json(502, {'error': 'No se pudo cargar el catalogo de modelos.'})
         except (OSError, sqlite3.Error, ValueError):
@@ -245,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.permitted(mutation=True):
             return
         path = urlsplit(self.path).path
-        if path not in ('/api/chat', '/api/memories/delete', '/api/model') or (self.command == 'DELETE' and path != '/api/memories/delete'):
+        if path not in ('/api/chat', '/api/memories', '/api/memories/delete', '/api/model') or (self.command == 'DELETE' and path != '/api/memories/delete'):
             self.json(404, {'error': 'Ruta no disponible.'})
             return
         try:
@@ -262,6 +304,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/model':
                 status, result = self.server.app.change_model(data)
                 self.json(status, result)
+            elif path == '/api/memories':
+                if set(data) != {'tema', 'contenido'} or not all(isinstance(data[key], str) for key in ('tema', 'contenido')):
+                    raise ValueError('Se requieren tema y contenido de texto.')
+                if not self.server.app.lock.acquire(blocking=False):
+                    self.json(409, {'error': 'Hay una respuesta en curso. Espera a que termine.'})
+                    return
+                try:
+                    result = save_memory(data['tema'], data['contenido'])
+                finally:
+                    self.server.app.lock.release()
+                self.json(200, result)
             elif path == '/api/memories/delete':
                 if set(data) != {'id'}:
                     raise ValueError('Se requiere solo id.')
@@ -287,8 +340,9 @@ class Handler(BaseHTTPRequestHandler):
             self.json(500, {'error': 'No se pudo guardar la configuracion local.'})
 
 
-def create_server(monitor, model, port=8765, router=None, answer_fn=None, models_fn=None, save_settings_fn=None):
-    app = AppState(monitor, model, router, answer_fn, models_fn, save_settings_fn)
+def create_server(monitor, model, port=8765, router=None, answer_fn=None, models_fn=None, save_settings_fn=None,
+                  ge_fn=None, wiki_fn=None):
+    app = AppState(monitor, model, router, answer_fn, models_fn, save_settings_fn, ge_fn, wiki_fn)
     try:
         return LocalServer(port, app)
     except OSError as exc:

@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -24,8 +25,11 @@ class WebTests(unittest.TestCase):
         self.answer = Mock(side_effect=self.reply)
         self.models = Mock(return_value=[{'slug': 'test-model', 'display_name': 'Test'}, {'slug': 'other'}])
         self.save_settings = Mock()
+        self.ge = Mock(return_value={'ok': True, 'matches': [{'name': 'Example item', 'high': 10, 'low': 9}]})
+        self.wiki = Mock(return_value={'ok': True, 'extract': 'Example extract', 'results': []})
         self.server = web_app.create_server(self.monitor, 'test-model', 0, answer_fn=self.answer,
-                                            models_fn=self.models, save_settings_fn=self.save_settings)
+                                            models_fn=self.models, save_settings_fn=self.save_settings,
+                                            ge_fn=self.ge, wiki_fn=self.wiki)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.http = requests.Session()
@@ -368,6 +372,121 @@ class WebTests(unittest.TestCase):
             self.assertIn('error', response.json())
         self.answer.assert_not_called()
         self.assertEqual(self.server.app.history, [])
+
+    def test_manual_notes_create_duplicate_fts_search_and_never_call_model(self):
+        note = {'tema': 'Quest Cape', 'contenido': 'Completar Dragon Slayer y entrenar Farming'}
+        response = self.post('/api/memories', note)
+        self.assertEqual(response.status_code, 200)
+        saved = response.json()
+        self.assertTrue(saved['saved'])
+        duplicate = self.post('/api/memories', note).json()
+        self.assertEqual(duplicate, {'saved': False, 'duplicate': True, 'id': saved['id']})
+        self.post('/api/memories', {'tema': 'Equipo', 'contenido': 'Example helmet'})
+        for query in ('dragon slayer', 'DRAGON farming', 'dragon missing'):
+            result = self.http.get(self.base + '/api/memories', params={'q': query}, timeout=5)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.json()['memories'][0]['id'], saved['id'])
+        self.assertEqual(self.http.get(self.base + '/api/memories?q=unmatched', timeout=5).json()['memories'], [])
+        self.assertEqual(len(self.http.get(self.base + '/api/memories?q=', timeout=5).json()['memories']), 2)
+        self.assertEqual(self.server.app.history, [])
+        self.answer.assert_not_called()
+
+    def test_manual_notes_validate_limits_csrf_origin_and_busy_lock(self):
+        good = {'tema': 'Meta', 'contenido': 'Fictional note'}
+        for data in ({}, {'tema':'x'}, {**good, 'extra':1}, {'tema':1,'contenido':'x'},
+                     {'tema':'x','contenido':False}, {'tema':' ','contenido':'x'},
+                     {'tema':'x'*201,'contenido':'x'}, {'tema':'x','contenido':'x'*8001},
+                     {'tema':'x','contenido':'bad\x00note'}):
+            self.assertEqual(self.post('/api/memories', data).status_code, 400)
+            self.assertFalse(self.server.app.lock.locked())
+        for q in ('x'*301, 'bad\x00query'):
+            self.assertEqual(self.http.get(self.base + '/api/memories', params={'q':q}, timeout=5).status_code, 400)
+        self.assertEqual(self.http.post(self.base + '/api/memories', json=good, timeout=5).status_code, 403)
+        self.assertEqual(self.post('/api/memories', good, Origin='https://external.example').status_code, 403)
+        self.server.app.lock.acquire()
+        try:
+            self.assertEqual(self.post('/api/memories', good).status_code, 409)
+        finally:
+            self.server.app.lock.release()
+        with patch.object(web_app, 'save_memory', side_effect=web_app.sqlite3.Error('private path')):
+            response = self.post('/api/memories', good)
+            self.assertEqual(response.status_code, 502)
+            self.assertNotIn('private path', response.text)
+        self.assertFalse(self.server.app.lock.locked())
+        self.assertEqual(memory_db.list_memories(), [])
+        self.answer.assert_not_called()
+
+    def test_direct_ge_and_wiki_use_injected_clients_without_inference_or_history(self):
+        for path, client in (('/api/ge', self.ge), ('/api/wiki', self.wiki)):
+            response = self.http.get(self.base + path, params={'q':'  Example & item  '}, timeout=5)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), client.return_value)
+            client.assert_called_once_with('Example & item')
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertEqual(self.server.app.history, [])
+        self.answer.assert_not_called()
+        self.models.assert_not_called()
+
+    def test_direct_oracle_validates_queries_guards_origin_and_sanitizes_errors(self):
+        for path, client in (('/api/ge', self.ge), ('/api/wiki', self.wiki)):
+            for q in ('', '  ', 'x'*101, 'bad\x00query'):
+                self.assertEqual(self.http.get(self.base + path, params={'q':q}, timeout=5).status_code, 400)
+            client.assert_not_called()
+            for headers in ({'Host':'rebind.example'}, {'Origin':'https://external.example'}, {'Sec-Fetch-Site':'cross-site'}):
+                self.assertEqual(self.http.get(self.base + path + '?q=test', headers=headers, timeout=5).status_code, 403)
+            client.side_effect = web_app.WikiError('private diagnostic')
+            response = self.http.get(self.base + path + '?q=test', timeout=5)
+            self.assertEqual(response.status_code, 502)
+            self.assertEqual(response.json(), {'error':'No se pudo consultar OSRS Wiki.'})
+            self.assertNotIn('private diagnostic', response.text)
+        self.answer.assert_not_called()
+
+    def test_phase6_controls_and_timer_data_preserve_dom_order(self):
+        self.monitor._state['timers'] = {'farming':[{'crop':'Example crop','state':'GROWING','readyAt':'2030-01-01T00:00:00Z','stage':2,'stages':5}], 'birdhouses':[]}
+        self.monitor._state['dailies'] = {'herbBoxes':{'unlocked':True,'claimed':False,'claimedCount':0,'max':15}}
+        data = self.http.get(self.base + '/api/status', timeout=5).json()
+        self.assertEqual(data['stats']['timers']['farming']['entries'][0]['stage'], 2)
+        self.assertFalse(data['stats']['dailies']['herbBoxes']['claimed'])
+        html = self.http.get(self.base, timeout=5).text
+        for name in ('dailies','memory-form','memory-topic','memory-text','memory-save','memory-search',
+                     'oracle-form','oracle-search','oracle-mode','oracle-submit','oracle-results'):
+            self.assertEqual(html.count(f'id="{name}"'), 1)
+        self.assertLess(html.index('id="progress-results"'), html.index('id="oracle-form"'))
+        self.assertLess(html.index('id="oracle-results"'), html.index('id="equipment"'))
+        self.assertLess(html.index('id="memory-form"'), html.index('id="memories"'))
+        self.answer.assert_not_called()
+
+    @unittest.skipUnless((web_app.DIST_ROOT / 'index.html').is_file(), 'Compila frontend con npm run build')
+    def test_react_bundle_assets_keep_mime_csp_and_session_token_out_of_javascript(self):
+        page = self.http.get(self.base, timeout=5)
+        self.assertIn('id="root"', page.text)
+        self.assertNotIn('@@APP@@', page.text)
+        self.assertNotIn('@@CSRF@@', page.text)
+        assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', page.text)
+        self.assertTrue(any(path.endswith('.js') for path in assets))
+        self.assertTrue(any(path.endswith('.css') for path in assets))
+        for path in assets:
+            result = self.http.get(self.base + path, timeout=5)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.headers['Content-Security-Policy'], page.headers['Content-Security-Policy'])
+            self.assertEqual(result.headers['Cache-Control'], 'no-store')
+            self.assertNotIn(self.server.app.csrf, result.text)
+            self.assertIn('javascript' if path.endswith('.js') else 'text/css', result.headers['Content-Type'])
+        self.answer.assert_not_called()
+
+    def test_compiled_assets_reject_traversal_unapproved_types_and_external_origins(self):
+        for path in ('/assets/%2e%2e/%2e%2e/auth.py','/assets/..%5c..%5cauth.py','/assets/missing.js','/assets/%00.css','/assets/test.html'):
+            self.assertEqual(self.http.get(self.base + path, timeout=5).status_code, 404, path)
+        self.assertEqual(self.http.get(self.base + '/assets/missing.js', headers={'Origin':'https://external.example'}, timeout=5).status_code, 403)
+        self.answer.assert_not_called()
+
+    def test_legacy_fallback_still_works_without_compiled_frontend(self):
+        with patch.object(web_app, 'DIST_ROOT', Path(self.temp.name) / 'unbuilt'):
+            response = self.http.get(self.base, timeout=5)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(self.server.app.csrf, response.text)
+            self.assertIn('src="/app.js"', response.text)
+            self.assertEqual(self.http.get(self.base + '/app.js', timeout=5).status_code, 200)
 
 
 if __name__ == '__main__':

@@ -41,3 +41,5 @@ CODIGO_COMPLETO.md
 .idea/
 Thumbs.db
 .DS_Store
+node_modules/
+.mcp.json

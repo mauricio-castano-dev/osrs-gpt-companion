@@ -9,10 +9,11 @@ class Element {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {}; this.dataset = {}; this.hidden = false; this.ownText = ''; this.className = ''; this.classList = {toggle: () => {}}; }
   remove() { this.removed = true; }
   focus() { this.focused = true; }
+  addEventListener(type, handler) { (this.listeners ||= {})[type] = handler; }
   get textContent() { return this.ownText + this.children.map(child => child.textContent).join(''); }
   set textContent(value) { this.ownText = String(value); this.children = []; }
   set innerHTML(_) { throw new Error('Unsafe HTML assignment'); }
-  append(...children) { for (const child of children) this.children.push(typeof child === 'string' ? Object.assign(new Element('#text'),{ownText:child}) : child); }
+  append(...children) { for (let child of children) { if (typeof child === 'string') child = Object.assign(new Element('#text'),{ownText:child}); child.parentElement = this; this.children.push(child); } }
   replaceChildren(...children) { this.children = []; this.ownText = ''; this.append(...children); }
   setAttribute(key,value) { this.attributes[key] = value; }
 }
@@ -92,7 +93,7 @@ test('Live thinking label reflects completed tool calls only while busy',()=>{
   context.updateThinking({busy:true,active_tools:[{name:'query_player_stats'},{name:'check_ge_price'}]});
   assert.equal(waiting.textContent,'Consultando: query_player_stats, check_ge_price…');
   context.updateThinking({busy:true,active_tools:[]});
-  assert.match(waiting.textContent,/preparando/);
+  assert.match(waiting.textContent,/preparando/i);
   context.updateThinking({busy:false,active_tools:[{name:'old'}]});
   assert.doesNotMatch(waiting.textContent,/old/);
 });
@@ -435,4 +436,168 @@ test('Equipment uses decorative span sprites and keeps exported slot and name te
   assert.match(icons[1].className,/icon-attack/);
   assert.match(byId('equipment').textContent,/HEADExample helmet/);
   assert.equal(descendants(byId('equipment'),'IMG').length,0);
+});
+
+test('RuneScribe uses functional copy and keeps removed promotional slogans out of HTML and JS',()=>{
+  const html = fs.readFileSync(path.join(__dirname,'..','ui','index.html'),'utf8');
+  const js = fs.readFileSync(path.join(__dirname,'..','ui','app.js'),'utf8');
+  for (const slogan of ['TU AVENTURA. TU COMPAÑERO.','OLD SCHOOL, NUEVAS POSIBILIDADES',
+    'ADVENTURE ASSISTANT','Tu compañero de aventuras','TU PRÓXIMA MISIÓN EMPIEZA AQUÍ',
+    'Un compañero. Mil aventuras.','LOCAL COMPANION']) {
+    assert.ok(!html.includes(slogan),slogan);
+    assert.ok(!js.includes(slogan),slogan);
+  }
+  assert.match(html,/<title>RuneScribe · OSRS HUD &amp; Wiki<\/title>/);
+  assert.match(html,/<h1>Rune<span>Scribe<\/span><\/h1>/);
+  assert.match(html,/Consultas &amp; Oráculo/);
+  assert.match(html,/Notas y objetivos/);
+  assert.match(html,/data-question="¿Tengo cultivos listos para recoger\?"/);
+  const {context,byId} = setup();
+  context.bubble('Example answer','assistant');
+  assert.equal(byId('conversation').children[0].children[0].textContent,'RuneScribe');
+  const waiting = byId('thinking');
+  context.updateThinking({busy:true,active_tools:[]});
+  assert.equal(waiting.textContent,'Preparando respuesta…');
+});
+
+test('Countdown formats seconds, minutes and hours and turns expired patches ready each second',()=>{
+  const {context,byId} = setup();
+  let now = Date.parse('2030-01-01T00:00:00Z');
+  context.Date = class extends Date { static now() { return now; } };
+  const stamp = seconds => new Date(now + seconds * 1000).toISOString();
+  assert.equal(context.countdown(stamp(30),'GROWING'),'Listo en 30 s');
+  assert.equal(context.countdown(stamp(61),'GROWING'),'Listo en 1 min 1 s');
+  assert.equal(context.countdown(stamp(3660),'GROWING'),'Listo en 1 h 1 min');
+  assert.equal(context.countdown(stamp(100),'READY'),'Listo para recoger');
+  assert.equal(context.countdown('bad-date','GROWING'),'');
+  assert.equal(context.countdown(stamp(-1),'DEAD'),'');
+  const row = context.activity('<img src=x>','Example patch','GROWING',stamp(1),2,5);
+  assert.match(row.textContent,/Etapa 2\/5/);
+  assert.match(row.className,/growing/);
+  const badge = row.children.at(-1);
+  context.document.querySelectorAll = selector => selector === '[data-ready-at]' ? [badge] : [];
+  now += 1500;
+  context.refreshAges();
+  assert.equal(badge.textContent,'Listo para recoger');
+  assert.equal(row.className,'activity ready');
+  assert.equal(descendants(row,'IMG').length,0);
+  const dead = context.activity('Dead patch','Example','DEAD',stamp(-10),1,5);
+  assert.equal(dead.className,'activity dead');
+  assert.equal(dead.children.length,2);
+  assert.equal(context.activity('Patch','Example','GROWING','invalid').children.length,2);
+});
+
+test('Dailies show only unlocked entries, safe names, counts and claimed state',()=>{
+  const {context,byId} = setup();
+  context.renderDailies({herbBoxes:{unlocked:true,claimed:false,claimedCount:0,max:15},
+    sand:{unlocked:true,claimed:true,claimedCount:84,max:84},locked:{unlocked:false,claimed:false},
+    '<script>fake()</script>':{unlocked:true,claimed:false},unstructured:1});
+  const rows = byId('dailies').children;
+  assert.equal(rows.length,3);
+  assert.match(rows[0].textContent,/Cajas de hierbasPendiente hoy · 0 \/ 15/);
+  assert.match(rows[0].className,/ready/);
+  assert.match(rows[1].textContent,/ArenaReclamado · 84 \/ 84/);
+  assert.match(rows[1].className,/growing/);
+  assert.equal(descendants(byId('dailies'),'SCRIPT').length,0);
+  context.renderDailies(null);
+  assert.equal(byId('dailies').textContent,'No hay dailies desbloqueadas registradas.');
+});
+
+test('Manual notes POST directly, keep filter, clear saved input and retain drafts on failure',async()=>{
+  const {context,byId} = setup();
+  byId('memory-topic').value = 'Meta'; byId('memory-text').value = '<img src=x>Quest Cape';
+  byId('memory-search').value = 'quest & cape';
+  const calls = [];
+  context.api = async (path,body) => { calls.push([path,body]); return body ? {saved:true,id:1} : {memories:[]}; };
+  await context.createMemory('Meta','<img src=x>Quest Cape');
+  assert.equal(calls[0][0],'/api/memories');
+  assert.equal(calls[0][1].contenido,'<img src=x>Quest Cape');
+  assert.equal(calls[1][0],'/api/memories?q=quest%20%26%20cape');
+  assert.equal(byId('memory-topic').value,'');
+  assert.equal(byId('memory-text').value,'');
+  assert.equal(byId('memory-feedback').textContent,'Nota guardada.');
+  assert.equal(byId('memory-save').disabled,false);
+  byId('memory-topic').value = 'Draft'; byId('memory-text').value = 'Keep this';
+  context.api = async () => { throw new Error('Busy'); };
+  await context.createMemory('Draft','Keep this');
+  assert.equal(byId('memory-text').value,'Keep this');
+  assert.equal(byId('memory-save').disabled,false);
+  assert.equal(byId('error').textContent,'Busy');
+});
+
+test('Memory search debounces, invalidates in-flight results immediately and renders text safely',async()=>{
+  const {context,byId,timers} = setup();
+  const pending = [], calls = [];
+  context.api = path => { calls.push(path); return new Promise(resolve => pending.push(resolve)); };
+  byId('memory-search').value = 'old';
+  const old = context.refreshMemories();
+  byId('memory-search').value = 'new & query';
+  context.queueMemorySearch();
+  assert.equal([...timers.values()][0].delay,180);
+  pending[0]({memories:[{id:1,tema:'STALE',contenido:'stale'}]});
+  await old;
+  assert.doesNotMatch(byId('memories').textContent,/STALE/);
+  const latest = [...timers.values()][0].fn();
+  assert.equal(calls[1],'/api/memories?q=new%20%26%20query');
+  pending[1]({memories:[{id:2,tema:'<img src=x>',contenido:'<script>fake()</script>'}]});
+  await latest;
+  assert.equal(descendants(byId('memories'),'IMG').length,0);
+  assert.equal(descendants(byId('memories'),'SCRIPT').length,0);
+  assert.match(byId('memories').textContent,/fake/);
+});
+
+test('Direct GE results show prices, limits, missing fields and safe item names',()=>{
+  const {context,byId} = setup();
+  context.renderOracleResults('ge',{matches:[{name:'<img src=x>',high:1200,low:1000,limit:70,highalch:800},{name:'No price',high:null,low:null}]});
+  const text = byId('oracle-results').textContent;
+  assert.match(text,/Compra inst\.: 1\.200 GP · Venta inst\.: 1\.000 GP/);
+  assert.match(text,/Límite 4h: 70 · High Alch: 800 GP/);
+  assert.match(text,/Compra inst\.: — GP/);
+  assert.equal(descendants(byId('oracle-results'),'IMG').length,0);
+  context.renderOracleResults('ge',{matches:[]});
+  assert.equal(byId('oracle-results').textContent,'Sin coincidencias en Grand Exchange.');
+});
+
+test('Direct Wiki renders extracts as text and links only to the exact HTTPS Wiki prefix',()=>{
+  const {context,byId} = setup();
+  context.renderOracleResults('wiki',{extract:'<script>fake()</script>',truncated:true,results:[
+    {title:'<img src=x>',url:'https://oldschool.runescape.wiki/w/Example'},
+    {title:'bad',url:'javascript:fake()'},{title:'bad',url:'https://oldschool.runescape.wiki.evil.example/'},
+    {title:'bad',url:'https://oldschool.runescape.wiki@evil.example/'},{title:'bad',url:'//oldschool.runescape.wiki/w/Example'}]});
+  const links = descendants(byId('oracle-results'),'A');
+  assert.equal(links.length,1);
+  assert.equal(links[0].target,'_blank');
+  assert.equal(links[0].rel,'noopener noreferrer');
+  assert.equal(descendants(byId('oracle-results'),'IMG').length,0);
+  assert.equal(descendants(byId('oracle-results'),'SCRIPT').length,0);
+  assert.match(byId('oracle-results').textContent,/Extracto abreviado/);
+  context.renderOracleResults('wiki',{results:[]});
+  assert.equal(byId('oracle-results').textContent,'Sin resultados en OSRS Wiki.');
+});
+
+test('Oracle sends encoded direct queries, skips empty text and prevents late responses overwriting new filters',async()=>{
+  const {context,byId} = setup();
+  const pending = [], calls = [];
+  context.api = path => { calls.push(path); return new Promise(resolve => pending.push(resolve)); };
+  byId('oracle-search').value = ''; byId('oracle-mode').value = 'ge';
+  await context.runOracleQuery();
+  assert.equal(calls.length,0);
+  byId('oracle-search').value = 'Example & item';
+  const old = context.runOracleQuery();
+  assert.equal(calls[0],'/api/ge?q=Example%20%26%20item');
+  context.resetOracleQuery();
+  byId('oracle-mode').value = 'wiki'; byId('oracle-search').value = 'Example boss';
+  const latest = context.runOracleQuery();
+  assert.equal(calls[1],'/api/wiki?q=Example%20boss');
+  pending[1]({results:[{title:'NEW',url:'https://oldschool.runescape.wiki/w/Example'}]});
+  await latest;
+  pending[0]({matches:[{name:'STALE'}]});
+  await old;
+  assert.match(byId('oracle-results').textContent,/NEW/);
+  assert.doesNotMatch(byId('oracle-results').textContent,/STALE/);
+  assert.equal(byId('oracle-submit').disabled,false);
+  context.api = async () => { throw new Error('Wiki unavailable'); };
+  await context.runOracleQuery();
+  assert.equal(byId('oracle-results').textContent,'Wiki unavailable');
+  assert.equal(byId('oracle-submit').disabled,false);
 });

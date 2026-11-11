@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="@@CSRF@@">
-  <title>OSRS GPT Companion</title>
+  <title>RuneScribe · OSRS HUD &amp; Wiki</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&amp;family=Pixelify+Sans:wght@500;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600&amp;display=swap">
   <link rel="stylesheet" href="/app.css">
   <script src="/app.js" defer></script>
@@ -12,13 +12,13 @@
 <body>
   <header class="masthead">
     <div class="brand-mark" aria-hidden="true"><span class="game-icon icon-attack"></span></div>
-    <div class="brand-copy"><p class="overline">TU AVENTURA. TU COMPAÑERO.</p><h1>OSRS <span>GPT Companion</span></h1><p class="brand-subtitle">CHARACTER SNAPSHOT <b>◆</b> OLD SCHOOL, NUEVAS POSIBILIDADES</p></div>
+    <div class="brand-copy"><h1>Rune<span>Scribe</span></h1><p class="brand-subtitle">CHARACTER SNAPSHOT <b>◆</b> GE &amp; OSRS WIKI</p></div>
     <div class="connection" id="connection" role="status"><i></i> Conectando…</div>
   </header>
   <main class="layout">
     <aside class="hud panel" aria-label="Estado del personaje">
       <div class="panel-heading"><h2>Tu personaje</h2><span class="freshness" id="live-freshness">Reporte: sin fecha</span></div>
-      <section class="character"><div class="crest" aria-hidden="true"><span class="game-icon icon-head"></span></div><div><span class="overline">PERFIL DEL AVENTURERO</span><h3 id="player-name">Esperando al aventurero</h3><p id="player-meta">Abre RuneLite y activa Character Snapshot.</p></div></section>
+      <section class="character"><div class="crest" aria-hidden="true"><span class="game-icon icon-head"></span></div><div><h3 id="player-name">Sin personaje activo</h3><p id="player-meta">Abre RuneLite y activa Character Snapshot.</p></div></section>
       <div class="wealth"><div><span><i class="game-icon icon-quests" aria-hidden="true"></i> QUEST POINTS</span><strong id="quest-points">—</strong></div><div><span><i class="game-icon icon-coins" aria-hidden="true"></i> FORTUNA · GP</span><strong id="gold">—</strong></div></div>
       <nav role="tablist" class="tabs" aria-label="Panel del personaje">
         <button role="tab" aria-controls="state-content" id="tab-state" class="selected" aria-selected="true"><span class="game-icon icon-stats" aria-hidden="true"></span> Habilidades &amp; Runs</button>
@@ -28,9 +28,10 @@
       <div role="tabpanel" aria-labelledby="tab-state" id="state-content">
         <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-stats" aria-hidden="true"></span> Habilidades</h3><span>LEVELS / 99</span></div><div class="skills" id="skills"><p class="muted">Esperando la primera instantánea…</p></div></section>
         <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-farming" aria-hidden="true"></span> Farming &amp; Birdhouses</h3><span id="patch-count"></span></div><div id="farming" class="activities"></div><div id="birdhouses" class="activities"></div></section>
+        <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-diaries" aria-hidden="true"></span> Dailies</h3><span>RESET DIARIO</span></div><div id="dailies" class="activities"></div></section>
       </div>
       <div role="tabpanel" aria-labelledby="tab-gear" id="gear-content" hidden>
-        <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-bank" aria-hidden="true"></span> Banco &amp; Inventario</h3><span class="local-badge">SIN TOKENS</span></div><label for="bank-search" class="sr-only">Buscar objetos del banco e inventario</label><input type="search" id="bank-search" maxlength="100" placeholder="Buscar en tu banco (ej. rune, prayer, whip)…"><div id="bank-results" class="equipment-grid" role="status"><p class="muted">Escribe para buscar entre tus objetos del banco sin gastar tokens.</p></div></section>
+        <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-bank" aria-hidden="true"></span> Banco &amp; Inventario</h3><span class="local-badge">LOCAL</span></div><label for="bank-search" class="sr-only">Buscar objetos del banco e inventario</label><input type="search" id="bank-search" maxlength="100" placeholder="Buscar en tu banco (ej. rune, prayer, whip)…"><div id="bank-results" class="equipment-grid" role="status"><p class="muted">Escribe para buscar objetos en tu banco o inventario.</p></div></section>
         <section class="hud-section progress-explorer"><div class="section-label"><h3><span class="game-icon icon-quests" aria-hidden="true"></span> Misiones &amp; Logros</h3><span class="local-badge">EN RAM</span></div>
           <label for="progress-search" class="sr-only">Filtrar misiones, diarios o logros de combate</label><input id="progress-search" type="search" maxlength="100" autocomplete="off" placeholder="Buscar misión, región o jefe…">
           <div class="quick-filters" aria-label="Filtros rápidos de progreso">
@@ -40,28 +41,35 @@
             <button type="button" data-progress-cat="diaries" data-progress-status="incomplete">Diarios pendientes</button>
           </div>
           <div class="progress-filters"><select id="progress-category" aria-label="Categoría de progreso"><option value="all">Todo</option><option value="quests">Misiones</option><option value="diaries">Diarios</option><option value="combat_achievements">Combat Achievements</option></select><select id="progress-status" aria-label="Estado de progreso"><option value="all">Todos los estados</option><option value="in_progress">En curso</option><option value="incomplete">Pendientes</option><option value="completed">Completados</option></select></div>
-          <div id="progress-results" class="stack" role="status"><p class="muted">Escribe o elige un filtro para explorar misiones, diarios o logros de combate en RAM.</p></div>
+          <div id="progress-results" class="stack" role="status"><p class="muted">Escribe o elige un filtro para consultar misiones, diarios o logros de combate.</p></div>
           <div id="quest-progress" class="progress-summary"></div>
           <h4 class="progress-title"><span class="game-icon icon-diaries" aria-hidden="true"></span> Achievement Diaries</h4><div id="diary-progress"></div>
           <h4 class="progress-title"><span class="game-icon icon-combat" aria-hidden="true"></span> Combat Achievements</h4><div id="combat-progress"></div>
+        </section>
+        <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-wiki" aria-hidden="true"></span> Oráculo GE &amp; Wiki</h3><span class="local-badge">DIRECTO</span></div>
+          <form id="oracle-form" class="oracle-bar"><label for="oracle-search" class="sr-only">Consultar Grand Exchange u OSRS Wiki</label><input id="oracle-search" type="search" maxlength="100" placeholder="Objeto o artículo (ej. Abyssal whip, Zulrah)…"><div class="oracle-controls"><select id="oracle-mode" aria-label="Modo de consulta"><option value="ge">Precios GE</option><option value="wiki">OSRS Wiki</option></select><button id="oracle-submit" type="submit">Consultar</button></div></form>
+          <div id="oracle-results" class="stack" role="status"><p class="muted">Consulta precios en vivo del Grand Exchange o extractos de la OSRS Wiki sin usar el modelo.</p></div>
         </section>
         <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-equipment" aria-hidden="true"></span> Equipo actual</h3><span>EQUIPMENT</span></div><div id="equipment" class="equipment-grid"></div></section>
         <section class="hud-section"><div class="section-label"><h3><span class="game-icon icon-ge" aria-hidden="true"></span> Grand Exchange</h3><span>TUS OFERTAS</span></div><div id="ge-offers"></div></section>
         <section class="hud-section"><h3><span class="game-icon icon-slayer" aria-hidden="true"></span> Slayer &amp; Kill Counts</h3><div id="slayer"></div><div id="kill-counts"></div></section>
       </div>
-      <section role="tabpanel" aria-labelledby="tab-memory" id="memory-content" hidden class="hud-section"><h3><span class="game-icon icon-memory" aria-hidden="true"></span> Lo que quieres recordar</h3><p class="muted">Tus objetivos y preferencias, guardados en este equipo.</p><div id="memories"></div></section>
+      <section role="tabpanel" aria-labelledby="tab-memory" id="memory-content" hidden class="hud-section"><h3><span class="game-icon icon-memory" aria-hidden="true"></span> Notas y objetivos</h3><p class="muted">Objetivos, bloqueos y notas de la cuenta guardados en SQLite local.</p>
+        <form id="memory-form" class="memory-form"><label for="memory-topic" class="sr-only">Tema de la nota</label><input id="memory-topic" type="text" maxlength="200" placeholder="Tema (ej. Meta, Equipo, Recordatorio)…" required><label for="memory-text" class="sr-only">Contenido de la nota</label><textarea id="memory-text" rows="2" maxlength="8000" placeholder="Escribe una nota u objetivo para guardar localmente…" required></textarea><button id="memory-save" type="submit">Guardar nota</button></form>
+        <p id="memory-feedback" class="muted" role="status"></p><label for="memory-search" class="sr-only">Buscar notas guardadas</label><input id="memory-search" type="search" maxlength="300" placeholder="Filtrar notas guardadas (FTS5)…"><div id="memories"></div>
+      </section>
       <details class="snapshot-details"><summary>Archivo conectado</summary><p id="state-path"></p><p>El HUD se actualiza cada 3 s. No utiliza el modelo.</p></details>
     </aside>
-    <section class="chat panel" aria-label="Chat con el compañero">
-      <div class="panel-heading chat-heading"><div><span class="overline">ADVENTURE ASSISTANT</span><h2>Tu compañero de aventuras</h2><p id="model-label">Usando tu plan de ChatGPT</p><select id="model-select" aria-label="Seleccionar modelo" hidden></select></div><button id="clear" class="quiet-button" title="Limpiar historial de conversación">↺ <span>Limpiar chat</span></button></div>
+    <section class="chat panel" aria-label="Consultas a RuneScribe">
+      <div class="panel-heading chat-heading"><div><h2>Consultas &amp; Oráculo</h2><p id="model-label">Cargando modelo…</p><select id="model-select" aria-label="Seleccionar modelo" hidden></select></div><button id="clear" class="quiet-button" title="Limpiar historial de conversación">↺ <span>Limpiar chat</span></button></div>
       <div class="conversation" id="conversation" aria-live="polite" aria-relevant="additions">
-        <div class="welcome" id="welcome"><div class="welcome-rune" aria-hidden="true"><span class="game-icon icon-quests"></span></div><span class="eyebrow">TU PRÓXIMA MISIÓN EMPIEZA AQUÍ</span><h2>¿Qué hacemos hoy?</h2><p>Un objetivo, una duda o tu próxima aventura.<br>Tu compañero consulta lo necesario y te ayuda a decidir.</p><div class="suggestions"><button data-question="¿Qué objetivo me recomiendas según mis habilidades?"><span class="game-icon icon-stats" aria-hidden="true"></span> Mi siguiente objetivo</button><button data-question="¿Tengo cultivos listos para recoger?"><span class="game-icon icon-farming" aria-hidden="true"></span> Revisar mis cultivos</button><button data-question="Recuerda que quiero conseguir la Quest Cape."><span class="game-icon icon-memory" aria-hidden="true"></span> Guardar una meta</button></div></div>
+        <div class="welcome" id="welcome"><div class="welcome-rune" aria-hidden="true"><span class="game-icon icon-quests"></span></div><h2>RuneScribe</h2><p>Consulta tu estado de cuenta, misiones, banco, precios del Grand Exchange y la OSRS Wiki.</p><div class="suggestions"><button data-question="¿Qué objetivo me recomiendas según mis habilidades?"><span class="game-icon icon-stats" aria-hidden="true"></span> Siguiente objetivo según mis niveles</button><button data-question="¿Tengo cultivos listos para recoger?"><span class="game-icon icon-farming" aria-hidden="true"></span> Estado de mis parches de Farming</button><button data-question="Recuerda que quiero conseguir la Quest Cape."><span class="game-icon icon-memory" aria-hidden="true"></span> Guardar meta: Quest Cape</button></div></div>
       </div>
       <div id="error" class="error" role="alert" hidden></div>
-      <form id="chat-form" class="composer"><label for="message" class="sr-only">Mensaje para el compañero</label><textarea id="message" rows="2" maxlength="8000" placeholder="Habla con tu compañero…" required></textarea><button id="send" type="submit" aria-label="Enviar mensaje">Enviar <span aria-hidden="true">➤</span></button></form>
-      <div class="composer-footer"><span>Enter para enviar · Shift + Enter para otra línea</span><span>Un compañero. Mil aventuras.</span></div>
+      <form id="chat-form" class="composer"><label for="message" class="sr-only">Consulta para RuneScribe</label><textarea id="message" rows="2" maxlength="8000" placeholder="Consulta misiones, banco, precios GE o mecánicas de la Wiki…" required></textarea><button id="send" type="submit" aria-label="Enviar mensaje">Enviar <span aria-hidden="true">➤</span></button></form>
+      <div class="composer-footer"><span>Enter para enviar · Shift + Enter para salto de línea</span></div>
     </section>
   </main>
-  <footer class="page-footer"><span>LOCAL COMPANION <b>◆</b> OLD SCHOOL SPIRIT</span><span>Proyecto independiente · Sin afiliación con Jagex u OpenAI</span></footer>
+  <footer class="page-footer"><span>RUNELITE CHARACTER SNAPSHOT <b>◆</b> OSRS WIKI API</span><span>Herramienta local independiente · Sin afiliación con Jagex</span></footer>
 </body>
 </html>

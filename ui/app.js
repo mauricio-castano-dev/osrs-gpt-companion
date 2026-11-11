@@ -12,6 +12,11 @@ let progressSearchTimer;
 let lastQuestsSnapshot = null;
 let lastStatsSnapshot = null;
 let lastItemsSnapshot = null;
+let memoryRequestSeq = 0;
+let memorySearchTimer;
+let memorySaving = false;
+let oracleRequestSeq = 0;
+const oracleHint = 'Consulta precios en vivo del Grand Exchange o extractos de la OSRS Wiki sin usar el modelo.';
 const diaryTiers = ['easy','medium','hard','elite'];
 const number = (value) => typeof value === 'number' ? new Intl.NumberFormat('es-CO').format(value) : '—';
 function relative(stamp) {
@@ -36,6 +41,7 @@ function error(message) { $('error').textContent = message; $('error').hidden = 
 function refreshAges() {
   $('live-freshness').textContent = 'Reporte: ' + (statusOk ? relative(lastUpdated) : 'sin datos actuales');
   document.querySelectorAll('[data-report]').forEach(el => { el.textContent = 'Reporte: ' + relative(el.dataset.report); });
+  document.querySelectorAll('[data-ready-at]').forEach(refreshTimer);
 }
 function entries(value) { return Array.isArray(value) ? value : value && Array.isArray(value.entries) ? value.entries : []; }
 function gameIcon(name) {
@@ -56,11 +62,43 @@ function renderSkills(skills) {
   });
   if (!$('skills').children.length) $('skills').append(node('p','No hay habilidades disponibles.','muted'));
 }
-function activity(title, sub, state) {
-  const cls = ['HARVESTABLE','READY','COMPLETE'].includes(state) ? 'ready' : state === 'DEAD' ? 'dead' : 'growing';
+function countdown(stamp, state) {
+  if (state === 'DEAD' || typeof stamp !== 'string' || !Number.isFinite(Date.parse(stamp))) return '';
+  const remaining = Date.parse(stamp) - Date.now();
+  if (['HARVESTABLE','READY','COMPLETE'].includes(state) || remaining <= 0) return 'Listo para recoger';
+  const rem = Math.ceil(remaining / 1000);
+  return rem < 60 ? 'Listo en ' + rem + ' s' : rem < 3600 ? 'Listo en ' + Math.floor(rem / 60) + ' min ' + (rem % 60) + ' s' : 'Listo en ' + Math.floor(rem / 3600) + ' h ' + Math.floor((rem % 3600) / 60) + ' min';
+}
+function refreshTimer(badge) {
+  const text = countdown(badge.dataset.readyAt,badge.dataset.state);
+  badge.textContent = text;
+  const row = badge.parentElement;
+  if (row && text === 'Listo para recoger') row.className = 'activity ready';
+}
+function activity(title, sub, state, readyAt, stage, stages) {
+  const validStamp = typeof readyAt === 'string' && Number.isFinite(Date.parse(readyAt));
+  const ready = ['HARVESTABLE','READY','COMPLETE'].includes(state) || (validStamp && Date.parse(readyAt) <= Date.now());
+  const cls = state === 'DEAD' ? 'dead' : ready ? 'ready' : 'growing';
+  if (Number.isFinite(stage) && Number.isFinite(stages) && stages > 0) sub += ` · Etapa ${stage}/${stages}`;
   const row = node('div', undefined, 'activity ' + cls);
   row.append(node('strong', title), node('small', sub));
+  if (validStamp && state !== 'DEAD') {
+    const badge = node('small',countdown(readyAt,state),'timer-badge');
+    badge.dataset.readyAt = readyAt; badge.dataset.state = state || '';
+    row.append(badge);
+  }
   return row;
+}
+function renderDailies(dailies) {
+  const container = $('dailies');
+  container.replaceChildren();
+  const names = {herbBoxes:'Cajas de hierbas',battlestaves:'Battlestaves',sand:'Arena',pureEssence:'Esencia pura',bonemeal:'Bonemeal',dynamite:'Dinamita',ogreArrows:'Flechas de ogro',bowstrings:'Cuerdas de arco',randomRunes:'Runas aleatorias'};
+  Object.entries(dailies || {}).filter(([,value]) => value && typeof value === 'object' && value.unlocked === true).forEach(([name,value]) => {
+    let detail = value.claimed === false ? 'Pendiente hoy' : value.claimed === true ? 'Reclamado' : 'Sin estado de reclamación';
+    if (Number.isFinite(value.claimedCount) && Number.isFinite(value.max)) detail += ` · ${number(value.claimedCount)} / ${number(value.max)}`;
+    container.append(activity(names[name] || name,detail,value.claimed === false ? 'READY' : 'CLAIMED'));
+  });
+  if (!container.children.length) container.append(node('p','No hay dailies desbloqueadas registradas.','muted'));
 }
 function renderGear(stats, items, quests) {
   $('equipment').replaceChildren(); $('ge-offers').replaceChildren();
@@ -219,7 +257,7 @@ function queueProgressSearch(immediate = false) {
   const category = $('progress-category').value;
   const status = $('progress-status').value;
   const empty = !q && category === 'all' && status === 'all';
-  $('progress-results').replaceChildren(node('p',empty ? 'Escribe o elige un filtro para explorar misiones, diarios o logros de combate en RAM.' : 'Consultando progreso…','muted'));
+  $('progress-results').replaceChildren(node('p',empty ? 'Escribe o elige un filtro para consultar misiones, diarios o logros de combate.' : 'Consultando progreso…','muted'));
   if (empty) return;
   const search = async () => {
     try {
@@ -239,7 +277,7 @@ function updateThinking(data) {
   const thinking = document.querySelector('.thinking');
   if (!thinking || !data.busy) return;
   const names = Array.isArray(data.active_tools) ? data.active_tools.map(tool => tool?.name).filter(name => typeof name === 'string') : [];
-  thinking.textContent = names.length ? 'Consultando: ' + names.join(', ') + '…' : 'El compañero está preparando tu respuesta…';
+  thinking.textContent = names.length ? 'Consultando: ' + names.join(', ') + '…' : 'Preparando respuesta…';
 }
 function renderBank(data) {
   const results = $('bank-results');
@@ -264,7 +302,7 @@ function queueBankSearch() {
   clearTimeout(bankSearchTimer);
   const version = ++bankSearchVersion;
   const query = $('bank-search').value.trim();
-  $('bank-results').replaceChildren(node('p',query ? 'Buscando…' : 'Escribe para buscar entre tus objetos del banco sin gastar tokens.','muted'));
+  $('bank-results').replaceChildren(node('p',query ? 'Buscando…' : 'Escribe para buscar objetos en tu banco o inventario.','muted'));
   if (!query) return;
   bankSearchTimer = setTimeout(async () => {
     try {
@@ -295,7 +333,7 @@ async function changeModel() {
     const data = await api('/api/model',{model:select.value});
     currentModel = data.model;
     select.value = currentModel;
-    $('model-label').textContent = 'Usando tu plan de ChatGPT · ' + currentModel;
+    $('model-label').textContent = 'Modelo: ' + currentModel;
     error('');
   } catch(e) { select.value = previous; error(e.message); }
   finally { select.disabled = busy; }
@@ -317,21 +355,23 @@ async function refreshStatus() {
     $('quest-points').textContent = number(stats.ok ? stats.questPoints : null);
     const currency = items.currency || {};
     $('gold').textContent = statusOk && currency.bank && currency.inventory ? number(currency.bank.gp_equivalent + currency.inventory.gp_equivalent) : '—';
-    $('model-label').textContent = 'Usando tu plan de ChatGPT · ' + data.model;
+    $('model-label').textContent = 'Modelo: ' + data.model;
     $('model-select').disabled = busy || data.busy;
+    $('memory-save').disabled = busy || data.busy || memorySaving;
     $('state-path').textContent = data.state_file;
     renderSkills(statusOk ? stats.skills : {});
     const timers = statusOk ? stats.timers || {} : {};
     $('farming').replaceChildren(); $('birdhouses').replaceChildren();
     entries(timers.farming).forEach(patch => {
-      if (patch && typeof patch === 'object') $('farming').append(activity(patch.crop || patch.patch || 'Parche', `${patch.patch || patch.region || 'Farming'} · ${patch.state || 'Sin estado'}`, patch.state));
+      if (patch && typeof patch === 'object') $('farming').append(activity(patch.crop || patch.patch || 'Parche', `${patch.patch || patch.region || 'Farming'} · ${patch.state || 'Sin estado'}`, patch.state,patch.readyAt,patch.stage,patch.stages));
     });
     const count = timers.farming?.active_count;
     $('patch-count').textContent = typeof count === 'number' ? `${count} ACTIVOS` : '';
     entries(timers.birdhouses).forEach(house => {
-      if (house && typeof house === 'object') $('birdhouses').append(activity('Birdhouse · ' + (house.house || 'Trampa'), `${house.space || 'Fossil Island'} · ${house.state || 'Sin estado'}`, house.state));
+      if (house && typeof house === 'object') $('birdhouses').append(activity('Birdhouse · ' + (house.house || 'Trampa'), `${house.space || 'Fossil Island'} · ${house.state || 'Sin estado'}`, house.state,house.readyAt,house.stage,house.stages));
     });
     if (!$('farming').children.length && !$('birdhouses').children.length) $('farming').append(node('p','No hay actividades registradas.','muted'));
+    renderDailies(statusOk ? stats.dailies : null);
     renderGear(stats,items,data.quests || {});
     updateThinking(data);
     refreshAges();
@@ -342,12 +382,15 @@ async function refreshStatus() {
     refreshAges();
   }
 }
-async function refreshMemories() {
+async function refreshMemories(query = '') {
+  const seq = ++memoryRequestSeq;
+  const q = (query || $('memory-search')?.value || '').trim();
   try {
-    const data = await api('/api/memories');
+    const data = await api('/api/memories' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    if (seq !== memoryRequestSeq) return;
     $('memory-count').textContent = `(${data.memories.length})`;
     $('memories').replaceChildren();
-    if (!data.memories.length) $('memories').append(node('p','Todavía no hay memorias. Cuéntale al compañero qué quieres recordar.','muted'));
+    if (!data.memories.length) $('memories').append(node('p',q ? 'Sin notas para esa búsqueda.' : 'No hay notas guardadas todavía.','muted'));
     data.memories.forEach(memory => {
       const card = node('article',undefined,'memory'), content = node('div',undefined,'memory-body');
       content.append(node('strong',memory.tema),node('p',memory.contenido),node('small',`MEMORIA #${memory.id}`));
@@ -356,7 +399,73 @@ async function refreshMemories() {
       remove.addEventListener('click', async () => { remove.disabled = true; try { await api('/api/memories/delete',{id:memory.id}); await refreshMemories(); } catch(e) { error(e.message); remove.disabled = false; } });
       card.append(content,remove); $('memories').append(card);
     });
+  } catch(e) { if (seq === memoryRequestSeq) error(e.message); }
+}
+function queueMemorySearch() {
+  clearTimeout(memorySearchTimer);
+  ++memoryRequestSeq;
+  memorySearchTimer = setTimeout(() => refreshMemories(),180);
+}
+async function createMemory(tema, contenido) {
+  if (memorySaving) return;
+  memorySaving = true; $('memory-save').disabled = true; error(''); $('memory-feedback').textContent = '';
+  try {
+    const result = await api('/api/memories',{tema,contenido});
+    if ($('memory-topic').value === tema) $('memory-topic').value = '';
+    if ($('memory-text').value === contenido) $('memory-text').value = '';
+    $('memory-feedback').textContent = result.duplicate ? 'La nota ya estaba guardada.' : 'Nota guardada.';
+    await refreshMemories();
+    return result;
   } catch(e) { error(e.message); }
+  finally { memorySaving = false; $('memory-save').disabled = busy; }
+}
+function resetOracleQuery() {
+  ++oracleRequestSeq;
+  $('oracle-submit').disabled = false;
+  $('oracle-results').replaceChildren(node('p',oracleHint,'muted'));
+}
+function renderOracleResults(mode, data) {
+  const container = $('oracle-results');
+  container.replaceChildren();
+  if (data?.ok === false) { container.append(node('p','Consulta no disponible.','muted')); return; }
+  if (mode === 'ge') {
+    const matches = Array.isArray(data?.matches) ? data.matches : [];
+    if (!matches.length) container.append(node('p','Sin coincidencias en Grand Exchange.','muted'));
+    matches.forEach(item => {
+      const card = node('article',undefined,'oracle-card');
+      card.append(node('strong',item.name),node('p',`Compra inst.: ${number(item.high)} GP · Venta inst.: ${number(item.low)} GP`));
+      if (item.limit != null || item.highalch != null) card.append(node('small',`Límite 4h: ${number(item.limit)} · High Alch: ${number(item.highalch)} GP`));
+      const stamp = seconds => typeof seconds === 'number' && Number.isFinite(seconds) ? relative(new Date(seconds * 1000).toISOString()) : 'sin fecha';
+      card.append(node('small',`Compra: ${stamp(item.highTime)} · Venta: ${stamp(item.lowTime)}`));
+      container.append(card);
+    });
+    if (matches.length) container.append(node('p','Precios observados; no son ofertas garantizadas.','muted'));
+  } else {
+    const results = Array.isArray(data?.results) ? data.results : [];
+    if (!results.length) { container.append(node('p','Sin resultados en OSRS Wiki.','muted')); return; }
+    if (data.extract) container.append(node('p',data.extract,'wiki-extract'));
+    results.forEach(result => {
+      if (typeof result.url !== 'string' || !result.url.startsWith('https://oldschool.runescape.wiki/')) return;
+      const link = node('a',result.title || 'OSRS Wiki','wiki-result');
+      link.href = result.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; container.append(link);
+    });
+    if (data.truncated) container.append(node('p','Extracto abreviado; consulta la página para ver el detalle.','muted'));
+  }
+}
+async function runOracleQuery() {
+  const seq = ++oracleRequestSeq;
+  const q = ($('oracle-search').value || '').trim();
+  const mode = $('oracle-mode').value;
+  if (!q) { resetOracleQuery(); return; }
+  if (!['ge','wiki'].includes(mode)) return;
+  $('oracle-submit').disabled = true;
+  $('oracle-results').replaceChildren(node('p','Consultando OSRS Wiki…','muted'));
+  try {
+    const data = await api(`/api/${mode}?q=${encodeURIComponent(q)}`);
+    if (seq === oracleRequestSeq) renderOracleResults(mode,data);
+  } catch(e) {
+    if (seq === oracleRequestSeq) $('oracle-results').replaceChildren(node('p',e.message,'muted'));
+  } finally { if (seq === oracleRequestSeq) $('oracle-submit').disabled = false; }
 }
 function inline(parent, text) {
   // Construye nodos; ningun texto del jugador, memoria o modelo se interpreta como HTML.
@@ -394,7 +503,7 @@ function bubble(text, role, data) {
   const card = node('article',undefined,'bubble '+role);
   const content = node('div',undefined,'bubble-content');
   if (role === 'assistant') markdown(content,text); else content.textContent = text;
-  card.append(node('div',role === 'user' ? 'Tú' : 'Companion','bubble-label'),content);
+  card.append(node('div',role === 'user' ? 'Tú' : 'RuneScribe','bubble-label'),content);
   if (data) {
     const chips = node('div',undefined,'tool-chips');
     const icons = {query_player_stats:'⚔',query_player_bank:'🎒',query_quests_and_diaries:'🧭',check_ge_price:'💰',search_osrs_wiki:'📖',save_agent_memory:'🧠',recall_agent_memory:'🔮'};
@@ -409,7 +518,7 @@ async function submit(message) {
   busy = true; error(''); $('send').disabled = true; $('clear').disabled = true;
   $('model-select').disabled = true;
   if (message !== '/limpiar') bubble(message,'user');
-  const waiting = node('div','El compañero está preparando tu respuesta…','thinking'); $('conversation').append(waiting);
+  const waiting = node('div','Preparando respuesta…','thinking'); $('conversation').append(waiting);
   const fastPoll = setInterval(refreshStatus,600);
   try {
     const data = await api('/api/chat',{message});
@@ -429,6 +538,11 @@ function tab(selected) {
   if (selected === 'memory') refreshMemories();
 }
 $('chat-form').addEventListener('submit',event => { event.preventDefault(); const text=$('message').value.trim(); if (!busy && text) { $('message').value=''; submit(text); } });
+$('memory-form').addEventListener('submit',event => { event.preventDefault(); createMemory($('memory-topic').value,$('memory-text').value); });
+$('memory-search').addEventListener('input',queueMemorySearch);
+$('oracle-form').addEventListener('submit',event => { event.preventDefault(); runOracleQuery(); });
+$('oracle-search').addEventListener('input',resetOracleQuery);
+$('oracle-mode').addEventListener('change',resetOracleQuery);
 $('message').addEventListener('keydown',event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('chat-form').requestSubmit(); } });
 $('clear').addEventListener('click',()=>submit('/limpiar'));
 $('bank-search').addEventListener('input',queueBankSearch);

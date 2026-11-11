@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osrs-gpt-companion"
-version = "0.5.0"
+version = "0.7.0"
 description = "Local OSRS agent with Character Snapshot, SQLite memory and an OSRS-style interface"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,8 @@ osrs-companion-ui = "main:run_ui"
 
 [tool.setuptools]
 py-modules = ["auth", "main", "inference", "state_monitor", "memory_db", "wiki_client", "tools", "osrs_reader", "web_app", "launcher"]
-packages = ["ui"]
+packages = ["ui", "frontend"]
 
 [tool.setuptools.package-data]
 ui = ["*.html", "*.css", "*.js"]
+frontend = ["dist/*.html", "dist/assets/*.js", "dist/assets/*.css", "dist/assets/*.svg"]
